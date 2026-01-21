@@ -2,8 +2,6 @@
 
 import { db } from "@/lib/db"
 import { hash } from "bcryptjs"
-import { signIn } from "@/auth"
-import { AuthError } from "next-auth"
 
 export async function signup(email: string, password: string, name: string) {
   try {
@@ -28,24 +26,12 @@ export async function signup(email: string, password: string, name: string) {
       },
     })
 
-    // Sign in the user
-    await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    })
-
     return { success: true, userId: user.id }
   } catch (error) {
-    if (error instanceof AuthError) {
-      switch (error.type) {
-        case "CredentialsSignin":
-          return { error: "Invalid credentials" }
-        default:
-          return { error: "An error occurred" }
-      }
+    if (error && typeof error === "object" && "message" in error) {
+      return { error: String(error.message) }
     }
-    throw error
+    return { error: "An error occurred during signup" }
   }
 }
 

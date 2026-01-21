@@ -2,9 +2,7 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
-import { AuthProvider } from "@/lib/auth-context"
-import { SessionProvider } from "next-auth/react"
-import { auth } from "@/auth"
+import { Providers } from "@/components/providers"
 import "./globals.css"
 
 const _geist = Geist({ subsets: ["latin"] })
@@ -33,19 +31,15 @@ export const metadata: Metadata = {
   },
 }
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const session = await auth()
-  
   return (
     <html lang="en">
       <body className={`font-sans antialiased`}>
-        <SessionProvider session={session}>
-          <AuthProvider>{children}</AuthProvider>
-        </SessionProvider>
+        <Providers>{children}</Providers>
         <Analytics />
       </body>
     </html>

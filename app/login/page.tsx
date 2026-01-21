@@ -35,7 +35,7 @@ export default function LoginPage() {
       await login(email, password)
       router.push("/dashboard")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed")
+      setError(err && typeof err === "object" && "message" in err ? String(err.message) : "Login failed")
     } finally {
       setIsLoading(false)
     }

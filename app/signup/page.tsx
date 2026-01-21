@@ -47,7 +47,7 @@ export default function SignupPage() {
       await signup(email, password, name)
       router.push("/onboarding")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Signup failed")
+      setError(err && typeof err === "object" && "message" in err ? String(err.message) : "Signup failed")
     } finally {
       setIsLoading(false)
     }
@@ -65,96 +65,6 @@ export default function SignupPage() {
             Start your personalized AI-powered learning journey
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              <Input
-                id="name"
-                type="text"
-                placeholder="John Doe"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                disabled={isLoading}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                disabled={isLoading}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={isLoading}
-                minLength={6}
-              />
-              <p className="text-xs text-muted-foreground">At least 6 characters</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                placeholder="••••••••"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                disabled={isLoading}
-                minLength={6}
-              />
-            </div>
-
-            {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            <Button type="submit" className="w-full" disabled={isLoading} size="lg">
-              {isLoading ? "Creating account..." : "Create Account"}
-            </Button>
-          </form>
-
-          <div className="mt-4 space-y-3">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="bg-white px-2 text-muted-foreground">Already have an account?</span>
-              </div>
-            </div>
-
-            <Link href="/login" className="block">
-              <Button variant="outline" className="w-full">
-                Sign In Instead
-              </Button>
-            </Link>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">

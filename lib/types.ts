@@ -35,6 +35,7 @@ export interface RoadmapStep {
 }
 
 export interface Roadmap {
+  id?: string
   careerPath: string
   overview: string
   estimatedTimeframe: string
