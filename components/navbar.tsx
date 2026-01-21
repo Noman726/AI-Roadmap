@@ -28,6 +28,7 @@ export function Navbar() {
     { href: "/dashboard", label: "Dashboard" },
     { href: "/roadmap", label: "Roadmap" },
     { href: "/progress", label: "Progress" },
+    { href: "/study-plan", label: "Study Plan" },
   ]
 
   return (

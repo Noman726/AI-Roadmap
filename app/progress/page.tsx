@@ -175,6 +175,27 @@ export default function ProgressPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle className="text-balance flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-primary" />
+                Weekly Study Plan
+              </CardTitle>
+              <CardDescription className="text-balance">Personalized learning schedule for this week</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">
+                Get a detailed week-by-week breakdown of your learning with specific tasks and time allocations.
+              </p>
+              <Button asChild className="w-full">
+                <a href="/study-plan">
+                  View Study Plan
+                  <Calendar className="ml-2 h-4 w-4" />
+                </a>
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle className="text-balance">Skills Learned</CardTitle>
               <CardDescription className="text-balance">Your growing skill set</CardDescription>
             </CardHeader>
