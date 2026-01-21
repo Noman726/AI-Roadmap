@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Calendar, Clock, BookOpen, Target, Loader2, AlertCircle } from "lucide-react"
+import { saveStudyPlan } from "@/lib/actions"
 import type { Roadmap } from "@/lib/types"
 
 interface StudyPlan {
@@ -57,7 +58,7 @@ export default function StudyPlanPage() {
   }, [user, authLoading, router])
 
   const generateStudyPlan = async () => {
-    if (!roadmap) return
+    if (!roadmap || !user) return
 
     setIsGenerating(true)
     try {
@@ -67,8 +68,8 @@ export default function StudyPlanPage() {
         return
       }
 
-      const profileData = localStorage.getItem(`profile_${user?.id}`)
-        ? JSON.parse(localStorage.getItem(`profile_${user?.id}`)!)
+      const profileData = localStorage.getItem(`profile_${user.id}`)
+        ? JSON.parse(localStorage.getItem(`profile_${user.id}`)!)
         : {}
 
       const response = await fetch("/api/generate-study-plan", {
@@ -86,7 +87,14 @@ export default function StudyPlanPage() {
 
       const data = await response.json()
       setStudyPlan(data.studyPlan)
-      localStorage.setItem(`studyPlan_${user?.id}`, JSON.stringify(data.studyPlan))
+      localStorage.setItem(`studyPlan_${user.id}`, JSON.stringify(data.studyPlan))
+
+      // Try to save to database
+      try {
+        await saveStudyPlan(user.id, roadmap.id || "default", data.studyPlan)
+      } catch (dbError) {
+        console.warn("Failed to save study plan to database:", dbError)
+      }
     } catch (error) {
       console.error("Error generating study plan:", error)
     } finally {

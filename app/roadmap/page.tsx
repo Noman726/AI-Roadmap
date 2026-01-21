@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Checkbox } from "@/components/ui/checkbox"
 import { BookOpen, CheckCircle2, Clock, ExternalLink, Loader2 } from "lucide-react"
+import { updateStepCompletion } from "@/lib/actions"
 import type { Roadmap } from "@/lib/types"
 
 export default function RoadmapPage() {
@@ -34,7 +35,7 @@ export default function RoadmapPage() {
     }
   }, [user, authLoading, router])
 
-  const toggleStepCompletion = (stepId: string) => {
+  const toggleStepCompletion = async (stepId: string) => {
     if (!roadmap || !user) return
 
     const updatedSteps = roadmap.steps.map((step) =>
@@ -44,6 +45,16 @@ export default function RoadmapPage() {
     const updatedRoadmap = { ...roadmap, steps: updatedSteps }
     setRoadmap(updatedRoadmap)
     localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(updatedRoadmap))
+
+    // Try to save to database
+    try {
+      const step = updatedSteps.find(s => s.id === stepId)
+      if (step) {
+        await updateStepCompletion(stepId, step.completed)
+      }
+    } catch (error) {
+      console.warn("Failed to save step completion to database:", error)
+    }
   }
 
   if (authLoading || !user || !roadmap) {

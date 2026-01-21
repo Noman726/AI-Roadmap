@@ -1,8 +1,9 @@
 "use client"
 
 import type React from "react"
-
 import { createContext, useContext, useState, useEffect } from "react"
+import { useSession, signIn, signOut } from "next-auth/react"
+import { signup as serverSignup } from "./actions"
 
 interface User {
   id: string
@@ -12,84 +13,87 @@ interface User {
 
 interface AuthContextType {
   user: User | null
-  login: (email: string, password: string, name?: string) => Promise<void>
+  login: (email: string, password: string) => Promise<void>
   signup: (email: string, password: string, name: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   isLoading: boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const { data: session, status } = useSession()
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("user")
-    if (storedUser) {
-      setUser(JSON.parse(storedUser))
+    setIsLoading(status === "loading")
+  }, [status])
+
+  const user = session?.user
+    ? {
+        id: (session.user as any).id || "",
+        email: session.user.email || "",
+        name: session.user.name || "",
+      }
+    : null
+
+  const login = async (email: string, password: string) => {
+    setIsLoading(true)
+    try {
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      })
+
+      if (!result?.ok) {
+        throw new Error(result?.error || "Login failed")
+      }
+    } finally {
+      setIsLoading(false)
     }
-    setIsLoading(false)
-  }, [])
-
-  const login = async (email: string, password: string, name?: string) => {
-    // Check if user exists in localStorage
-    const users = JSON.parse(localStorage.getItem("users") || "[]")
-    const existingUser = users.find((u: any) => u.email === email)
-
-    if (!existingUser) {
-      throw new Error("User not found. Please sign up first.")
-    }
-
-    if (existingUser.password !== password) {
-      throw new Error("Invalid password")
-    }
-
-    const userData = {
-      id: existingUser.id,
-      email: existingUser.email,
-      name: existingUser.name,
-    }
-
-    setUser(userData)
-    localStorage.setItem("user", JSON.stringify(userData))
   }
 
   const signup = async (email: string, password: string, name: string) => {
-    // Check if user already exists
-    const users = JSON.parse(localStorage.getItem("users") || "[]")
-    const existingUser = users.find((u: any) => u.email === email)
-
-    if (existingUser) {
-      throw new Error("User already exists. Please login.")
+    setIsLoading(true)
+    try {
+      const result = await serverSignup(email, password, name)
+      if (result?.error) {
+        throw new Error(result.error)
+      }
+      // Auto-login after signup
+      await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      })
+    } finally {
+      setIsLoading(false)
     }
-
-    const newUser = {
-      id: crypto.randomUUID(),
-      email,
-      password,
-      name,
-    }
-
-    users.push(newUser)
-    localStorage.setItem("users", JSON.stringify(users))
-
-    const userData = {
-      id: newUser.id,
-      email: newUser.email,
-      name: newUser.name,
-    }
-
-    setUser(userData)
-    localStorage.setItem("user", JSON.stringify(userData))
   }
 
-  const logout = () => {
-    setUser(null)
-    localStorage.removeItem("user")
+  const logout = async () => {
+    setIsLoading(true)
+    try {
+      await signOut({ redirect: false })
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  return <AuthContext.Provider value={{ user, login, signup, logout, isLoading }}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        login,
+        signup,
+        logout,
+        isLoading,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
 export function useAuth() {

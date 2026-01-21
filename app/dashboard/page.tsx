@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Sparkles, Target, BookOpen, TrendingUp, ArrowRight, Loader2 } from "lucide-react"
+import { getUserRoadmap } from "@/lib/actions"
 import type { Profile, Roadmap } from "@/lib/types"
 
 export default function DashboardPage() {
@@ -25,7 +26,7 @@ export default function DashboardPage() {
     }
 
     if (user) {
-      // Load profile
+      // Load profile from localStorage (or database via server actions)
       const storedProfile = localStorage.getItem(`profile_${user.id}`)
       if (storedProfile) {
         setProfile(JSON.parse(storedProfile))
@@ -35,12 +36,32 @@ export default function DashboardPage() {
       }
 
       // Load roadmap
-      const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
-      if (storedRoadmap) {
-        const roadmapData = JSON.parse(storedRoadmap)
-        setRoadmap(roadmapData)
-        calculateProgress(roadmapData)
+      const loadRoadmap = async () => {
+        try {
+          const dbRoadmap = await getUserRoadmap(user.id)
+          if (dbRoadmap) {
+            setRoadmap(dbRoadmap)
+            calculateProgress(dbRoadmap)
+          } else {
+            const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
+            if (storedRoadmap) {
+              const roadmapData = JSON.parse(storedRoadmap)
+              setRoadmap(roadmapData)
+              calculateProgress(roadmapData)
+            }
+          }
+        } catch (error) {
+          // Fallback to localStorage
+          const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
+          if (storedRoadmap) {
+            const roadmapData = JSON.parse(storedRoadmap)
+            setRoadmap(roadmapData)
+            calculateProgress(roadmapData)
+          }
+        }
       }
+
+      loadRoadmap()
     }
   }, [user, authLoading, router])
 
@@ -53,7 +74,7 @@ export default function DashboardPage() {
   }
 
   const generateRoadmap = async () => {
-    if (!profile) return
+    if (!profile || !user) return
 
     setIsGenerating(true)
     try {
@@ -74,7 +95,18 @@ export default function DashboardPage() {
       }
 
       setRoadmap(roadmapWithProgress)
-      localStorage.setItem(`roadmap_${user?.id}`, JSON.stringify(roadmapWithProgress))
+      
+      // Save to localStorage for immediate availability
+      localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(roadmapWithProgress))
+      
+      // Try to save to database
+      try {
+        const { saveRoadmap } = await import("@/lib/actions")
+        await saveRoadmap(user.id, roadmapWithProgress)
+      } catch (dbError) {
+        console.warn("Failed to save roadmap to database, using localStorage:", dbError)
+      }
+      
       router.push("/roadmap")
     } catch (error) {
       console.error("Error generating roadmap:", error)

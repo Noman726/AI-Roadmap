@@ -10,12 +10,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { ArrowRight, ArrowLeft } from "lucide-react"
+import { ArrowRight, ArrowLeft, Loader2 } from "lucide-react"
+import { saveProfile } from "@/lib/actions"
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1)
   const { user } = useAuth()
   const router = useRouter()
+  const [isLoading, setIsLoading] = useState(false)
 
   // Form state
   const [interests, setInterests] = useState("")
@@ -25,23 +27,44 @@ export default function OnboardingPage() {
   const [learningStyle, setLearningStyle] = useState("")
   const [studyTime, setStudyTime] = useState("")
 
-  const handleSubmit = () => {
-    const profileData = {
-      userId: user?.id,
-      interests,
-      educationLevel,
-      careerGoal,
-      currentSkillLevel,
-      learningStyle,
-      studyTime,
-      createdAt: new Date().toISOString(),
+  const handleSubmit = async () => {
+    if (!user) return
+
+    setIsLoading(true)
+    try {
+      const profileData = {
+        interests,
+        educationLevel,
+        careerGoal,
+        currentSkillLevel,
+        learningStyle,
+        studyTime,
+      }
+
+      // Save to database
+      await saveProfile(user.id, profileData)
+
+      // Also store in localStorage as fallback
+      localStorage.setItem(`profile_${user.id}`, JSON.stringify(profileData))
+
+      // Redirect to dashboard
+      router.push("/dashboard")
+    } catch (error) {
+      console.error("Error saving profile:", error)
+      // Fallback: save to localStorage only if database fails
+      const profileData = {
+        interests,
+        educationLevel,
+        careerGoal,
+        currentSkillLevel,
+        learningStyle,
+        studyTime,
+      }
+      localStorage.setItem(`profile_${user.id}`, JSON.stringify(profileData))
+      router.push("/dashboard")
+    } finally {
+      setIsLoading(false)
     }
-
-    // Store profile data in localStorage
-    localStorage.setItem(`profile_${user?.id}`, JSON.stringify(profileData))
-
-    // Redirect to dashboard
-    router.push("/dashboard")
   }
 
   const totalSteps = 3
@@ -249,8 +272,15 @@ export default function OnboardingPage() {
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             ) : (
-              <Button onClick={handleSubmit} disabled={!studyTime}>
-                Complete Setup
+              <Button onClick={handleSubmit} disabled={!studyTime || isLoading}>
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving Profile...
+                  </>
+                ) : (
+                  "Complete Setup"
+                )}
               </Button>
             )}
           </div>

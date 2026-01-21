@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, Circle, TrendingUp, Calendar, Sparkles, Loader2, Award, Target, BookOpen } from "lucide-react"
+import { saveProgress } from "@/lib/actions"
 import type { Profile, Roadmap } from "@/lib/types"
 
 export default function ProgressPage() {
@@ -39,7 +40,7 @@ export default function ProgressPage() {
   }, [user, authLoading, router])
 
   const getAIFeedback = async () => {
-    if (!profile || !roadmap) return
+    if (!profile || !roadmap || !user) return
 
     setIsLoadingFeedback(true)
     try {
@@ -58,6 +59,13 @@ export default function ProgressPage() {
 
       const data = await response.json()
       setFeedback(data.feedback)
+
+      // Try to save feedback to database
+      try {
+        await saveProgress(user.id, roadmap.id || "default", completedSteps, data.feedback)
+      } catch (dbError) {
+        console.warn("Failed to save feedback to database:", dbError)
+      }
     } catch (error) {
       console.error("Error generating feedback:", error)
     } finally {
