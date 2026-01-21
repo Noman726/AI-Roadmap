@@ -48,7 +48,7 @@ Generate a specific, day-by-day study plan with:
 Make sure the total weekly hours match their available study time.`
 
   const { object } = await generateObject({
-    model: "openai/gpt-5-mini",
+    model: "openai:gpt-4o-mini",
     schema: studyPlanSchema,
     prompt,
     maxOutputTokens: 2000,

@@ -60,7 +60,7 @@ Generate a detailed step-by-step roadmap that:
 Make the roadmap practical, achievable, and tailored to their learning style. Include real resources when possible (Coursera, Udemy, YouTube channels, books, documentation).`
 
   const { object } = await generateObject({
-    model: "openai/gpt-5-mini",
+    model: "openai:gpt-4o-mini",
     schema: roadmapSchema,
     prompt,
     maxOutputTokens: 3000,
