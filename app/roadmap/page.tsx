@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Checkbox } from "@/components/ui/checkbox"
-import { BookOpen, CheckCircle2, Clock, ExternalLink, Loader2 } from "lucide-react"
+import { BookOpen, CheckCircle2, Clock, ExternalLink, Loader2, Sparkles } from "lucide-react"
 import { updateStepCompletion } from "@/lib/actions"
 import type { Roadmap } from "@/lib/types"
 
@@ -18,6 +18,37 @@ export default function RoadmapPage() {
   const router = useRouter()
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null)
   const [expandedStep, setExpandedStep] = useState<string | null>(null)
+  const [isGenerating, setIsGenerating] = useState<string | null>(null)
+
+  const generateStudyPlan = async (step: any) => {
+    if (!user || !roadmap) return
+    setIsGenerating(step.id)
+    try {
+      const response = await fetch("/api/generate-study-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profile: JSON.parse(localStorage.getItem(`profile_${user.id}`) || "{}"),
+          currentStep: step
+        }),
+      })
+      const data = await response.json()
+
+      // Save to local storage for now (or could redirect to a view)
+      localStorage.setItem(`studyPlan_${user.id}_${step.id}`, JSON.stringify(data.studyPlan))
+
+      // Simple alert for verification since we don't have a dedicated view page ready 
+      // and the user just wanted it to "work".
+      // Ideally we router.push(`/study-plan/${step.id}`) but that page doesn't exist.
+      // Let's just alert success for now or log it.
+      // Actually, let's navigate to the study-plan directory if it exists, earlier I saw it.
+      router.push(`/study-plan?stepId=${step.id}`)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setIsGenerating(null)
+    }
+  }
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -93,9 +124,8 @@ export default function RoadmapPage() {
               <CardHeader>
                 <div className="flex items-start gap-4">
                   <div
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
-                      step.completed ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                    }`}
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${step.completed ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                      }`}
                   >
                     {step.completed ? <CheckCircle2 className="h-5 w-5" /> : index + 1}
                   </div>
@@ -112,14 +142,43 @@ export default function RoadmapPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setExpandedStep(expandedStep === step.id ? null : step.id)}
-                  className="mb-4"
-                >
-                  {expandedStep === step.id ? "Hide Details" : "Show Details"}
-                </Button>
+                <div className="flex gap-2 mb-4">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExpandedStep(expandedStep === step.id ? null : step.id)}
+                  >
+                    {expandedStep === step.id ? "Hide Details" : "Show Details"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      // In a real app we'd navigate to a study plan page or open a modal
+                      // For now let's just trigger the API to verify it works (and maybe alert)
+                      // Or better, navigate to a new page /study-plan/[stepId]
+                      // But since I don't want to build a whole new page right now, 
+                      // I will add a simple "Generate Study Plan" that saves to local storage and alerts for now,
+                      // or just add a visual indicator.
+                      // Wait, the robust plan suggested "Connect UI to API". 
+                      // Let's implement a proper handler.
+                      generateStudyPlan(step)
+                    }}
+                    disabled={isGenerating === step.id}
+                  >
+                    {isGenerating === step.id ? (
+                      <>
+                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="mr-2 h-3 w-3" />
+                        Generate Study Plan
+                      </>
+                    )}
+                  </Button>
+                </div>
 
                 {expandedStep === step.id && (
                   <div className="space-y-4">

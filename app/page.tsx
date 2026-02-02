@@ -1,22 +1,22 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { ArrowRight, BookOpen, Target, TrendingUp, Sparkles } from "lucide-react"
+import { ArrowRight, BookOpen, Target, TrendingUp, Sparkles, Map, Compass } from "lucide-react"
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen flex-col bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+    <div className="flex min-h-screen flex-col bg-background">
       {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm">
+      <header className="fixed top-0 w-full border-b bg-background/80 backdrop-blur-sm z-50">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <div className="flex items-center gap-2 font-bold text-xl">
-            <Sparkles className="h-6 w-6 text-indigo-600" />
-            <span className="text-balance">AI Roadmap</span>
+          <div className="flex items-center gap-2 font-heading text-xl font-bold tracking-tight text-primary">
+            <Compass className="h-6 w-6" />
+            <span>AI Roadmap</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" asChild>
-              <Link href="/login">Sign In</Link>
-            </Button>
-            <Button asChild>
+          <div className="flex items-center gap-4">
+            <Link href="/login" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors">
+              Sign In
+            </Link>
+            <Button asChild className="rounded-full shadow-lg hover:shadow-xl transition-all duration-300">
               <Link href="/signup">Get Started</Link>
             </Button>
           </div>
@@ -24,59 +24,68 @@ export default function Home() {
       </header>
 
       {/* Hero Section */}
-      <main className="flex-1">
-        <section className="container mx-auto px-4 py-24 text-center">
-          <div className="mx-auto max-w-3xl space-y-6">
-            <h1 className="text-balance text-5xl font-bold leading-tight tracking-tight sm:text-6xl">
-              Your Personalized Learning Journey Starts Here
+      <main className="flex-1 pt-16">
+        <section className="container mx-auto px-4 py-24 sm:py-32">
+          <div className="mx-auto max-w-4xl text-center space-y-8">
+            <div className="inline-flex items-center rounded-full border bg-muted/50 px-3 py-1 text-sm text-muted-foreground backdrop-blur-sm">
+              <Sparkles className="mr-2 h-3.5 w-3.5 text-secondary-foreground" />
+              <span>No more tutorial hell. Just progress.</span>
+            </div>
+
+            <h1 className="font-heading text-5xl font-extrabold leading-[1.1] tracking-tight text-foreground sm:text-7xl">
+              Build a Career You <span className="text-primary italic">Actually</span> Want.
             </h1>
-            <p className="text-balance text-lg text-muted-foreground leading-relaxed sm:text-xl">
-              Transform your goals into actionable roadmaps with AI-powered guidance. Get personalized learning paths,
-              curated resources, and progress tracking.
+
+            <p className="mx-auto max-w-2xl text-lg text-muted-foreground sm:text-xl leading-relaxed">
+              Stop guessing what to learn next. We create custom, step-by-step learning paths tailored to your goals, current skills, and learning style.
             </p>
-            <div className="flex flex-col items-center justify-center gap-3 pt-4 sm:flex-row">
-              <Button size="lg" asChild className="w-full sm:w-auto">
+
+            <div className="flex flex-col items-center justify-center gap-4 pt-4 sm:flex-row">
+              <Button size="lg" asChild className="h-12 rounded-full px-8 text-lg shadow-xl hover:shadow-2xl hover:-translate-y-0.5 transition-all duration-300">
                 <Link href="/signup">
                   Start Your Journey <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
-              <Button size="lg" variant="outline" asChild className="w-full sm:w-auto bg-transparent">
-                <Link href="/login">Sign In</Link>
+              <Button size="lg" variant="outline" asChild className="h-12 rounded-full px-8 text-lg border-2 hover:bg-muted/50 bg-transparent">
+                <Link href="/login">I already have an account</Link>
               </Button>
             </div>
           </div>
         </section>
 
         {/* Features Section */}
-        <section className="container mx-auto px-4 py-16">
-          <div className="grid gap-8 md:grid-cols-3">
-            <div className="flex flex-col items-center space-y-3 rounded-lg bg-white p-6 text-center shadow-sm">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100">
-                <Target className="h-6 w-6 text-indigo-600" />
+        <section className="container mx-auto px-4 py-24 bg-muted/30">
+          <div className="grid gap-12 md:grid-cols-3">
+            {/* Feature 1 */}
+            <div className="group relative overflow-hidden rounded-3xl bg-card p-8 shadow-sm transition-all hover:shadow-md hover:-translate-y-1">
+              <div className="mb-6 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-100 text-primary">
+                <Map className="h-7 w-7" />
               </div>
-              <h3 className="text-balance font-semibold text-xl">AI-Powered Mapping</h3>
-              <p className="text-balance text-muted-foreground leading-relaxed">
-                Our AI analyzes your interests and goals to create customized career pathways and learning plans
+              <h3 className="mb-3 font-heading text-2xl font-bold">Your Personal GPS</h3>
+              <p className="text-muted-foreground leading-relaxed">
+                Most roadmaps are generic. Yours is unique. We analyze where you are and where you want to go, then plot the most efficient route.
               </p>
             </div>
 
-            <div className="flex flex-col items-center space-y-3 rounded-lg bg-white p-6 text-center shadow-sm">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100">
-                <BookOpen className="h-6 w-6 text-indigo-600" />
+            {/* Feature 2 */}
+            <div className="group relative overflow-hidden rounded-3xl bg-card p-8 shadow-sm transition-all hover:shadow-md hover:-translate-y-1">
+              <div className="mb-6 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
+                <BookOpen className="h-7 w-7" />
               </div>
-              <h3 className="text-balance font-semibold text-xl">Curated Resources</h3>
-              <p className="text-balance text-muted-foreground leading-relaxed">
-                Get personalized recommendations for courses, books, tutorials, and projects tailored to your style
+              <h3 className="mb-3 font-heading text-2xl font-bold">Curated for Humans</h3>
+              <p className="text-muted-foreground leading-relaxed">
+                Forget 40-hour stale documentation. We fetch the best modern tutorials, videos, and interactive courses that actually teach.
               </p>
             </div>
 
-            <div className="flex flex-col items-center space-y-3 rounded-lg bg-white p-6 text-center shadow-sm">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100">
-                <TrendingUp className="h-6 w-6 text-indigo-600" />
+            {/* Feature 3 */}
+            <div className="group relative overflow-hidden rounded-3xl bg-card p-8 shadow-sm transition-all hover:shadow-md hover:-translate-y-1">
+              <div className="mb-6 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
+                <TrendingUp className="h-7 w-7" />
               </div>
-              <h3 className="text-balance font-semibold text-xl">Progress Tracking</h3>
-              <p className="text-balance text-muted-foreground leading-relaxed">
-                Track your learning milestones and get AI feedback to stay motivated and on track
+              <h3 className="mb-3 font-heading text-2xl font-bold">Tangible Progress</h3>
+              <p className="text-muted-foreground leading-relaxed">
+                Don't just watch videos. Track your milestones, build projects, and see your skills grow with real-time feedback.
               </p>
             </div>
           </div>
@@ -84,9 +93,16 @@ export default function Home() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t bg-white py-8">
-        <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          <p>&copy; 2025 AI Roadmap Generator. Built for students, by students.</p>
+      <footer className="border-t py-12 bg-background">
+        <div className="container mx-auto px-4 flex flex-col items-center justify-between gap-6 sm:flex-row">
+          <p className="text-sm text-muted-foreground">
+            &copy; 2025 AI Roadmap. Crafted with care.
+          </p>
+          <div className="flex gap-6 text-sm text-muted-foreground">
+            <Link href="#" className="hover:text-primary transition-colors">Privacy</Link>
+            <Link href="#" className="hover:text-primary transition-colors">Terms</Link>
+            <Link href="#" className="hover:text-primary transition-colors">Twitter</Link>
+          </div>
         </div>
       </footer>
     </div>

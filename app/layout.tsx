@@ -1,17 +1,23 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Geist, Geist_Mono } from "next/font/google"
+import { Fraunces, Plus_Jakarta_Sans } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { Providers } from "@/components/providers"
 import "./globals.css"
 
-const _geist = Geist({ subsets: ["latin"] })
-const _geistMono = Geist_Mono({ subsets: ["latin"] })
+const fontHeading = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-heading",
+})
+
+const fontBody = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-body",
+})
 
 export const metadata: Metadata = {
   title: "AI Roadmap Generator - Personalized Learning Paths",
   description: "Create personalized learning and career roadmaps with AI-powered guidance",
-  generator: "v0.app",
   icons: {
     icon: [
       {
@@ -38,7 +44,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`font-sans antialiased`}>
+      <body className={`${fontHeading.variable} ${fontBody.variable} font-body antialiased`}>
         <Providers>{children}</Providers>
         <Analytics />
       </body>

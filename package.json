@@ -1,5 +1,5 @@
 {
-  "name": "my-v0-project",
+  "name": "ai-roadmap",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,6 +9,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.25",
     "@hookform/resolvers": "^3.10.0",
     "@prisma/client": "^5.22.0",
     "@radix-ui/react-accordion": "1.2.2",
