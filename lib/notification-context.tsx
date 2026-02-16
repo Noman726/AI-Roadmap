@@ -50,8 +50,11 @@ export function NotificationProvider({
     if (user?.id) {
       headers["x-user-id"] = user.id
     }
+    if (user?.email) {
+      headers["x-user-email"] = user.email
+    }
     return headers
-  }, [user?.id])
+  }, [user?.id, user?.email])
 
   const fetchNotifications = useCallback(async () => {
     if (!user?.id) return

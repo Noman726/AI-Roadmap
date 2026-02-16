@@ -32,12 +32,53 @@ export default function ProgressPage() {
         setProfile(JSON.parse(storedProfile))
       }
 
-      const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
-      if (storedRoadmap) {
-        setRoadmap(JSON.parse(storedRoadmap))
+      // Fetch latest roadmap from server to ensure we have current progress
+      const fetchRoadmap = async () => {
+        try {
+          const response = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}`)
+          if (response.ok) {
+            const { roadmap } = await response.json()
+            setRoadmap(roadmap)
+            localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(roadmap))
+          } else {
+            // Fallback to localStorage if server fetch fails
+            const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
+            if (storedRoadmap) {
+              setRoadmap(JSON.parse(storedRoadmap))
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching roadmap:", error)
+          const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
+          if (storedRoadmap) {
+            setRoadmap(JSON.parse(storedRoadmap))
+          }
+        }
       }
+
+      fetchRoadmap()
     }
   }, [user, authLoading, router])
+
+  // Periodically refresh roadmap to get latest progress
+  useEffect(() => {
+    if (!user || !roadmap) return
+
+    const interval = setInterval(async () => {
+      try {
+        // Fetch latest roadmap
+        const response = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}`)
+        if (response.ok) {
+          const { roadmap: apiRoadmap } = await response.json()
+          setRoadmap(apiRoadmap)
+        }
+      } catch (error) {
+        console.error("Error refreshing roadmap:", error)
+      }
+    }, 3000) // Refresh every 3 seconds for faster updates
+
+    return () => clearInterval(interval)
+  }, [user, roadmap?.id])
 
   const getAIFeedback = async () => {
     if (!profile || !roadmap || !user) return
@@ -199,6 +240,31 @@ export default function ProgressPage() {
                   <Calendar className="ml-2 h-4 w-4" />
                 </a>
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm text-muted-foreground">Roadmap Steps Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {roadmap.steps.map((step, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm p-2 rounded bg-muted/50">
+                    <div className="flex items-center gap-2">
+                      {step.completed ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <Circle className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span className={step.completed ? "line-through text-muted-foreground" : ""}>
+                        {step.title}
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground font-medium">{step.progress}%</span>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
 

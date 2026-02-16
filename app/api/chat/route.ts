@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/db"
+import { prisma, resolveDbUserId } from "@/lib/db"
 import { generateText } from "ai"
 import { groq } from "@ai-sdk/groq"
 
@@ -7,14 +7,20 @@ import { groq } from "@ai-sdk/groq"
 async function getUserFromRequest(req: NextRequest) {
   try {
     const userId = req.headers.get("x-user-id")
+    const email = req.headers.get("x-user-email")
     
     if (!userId) {
       return null
     }
 
-    // Try to find user in database
-    let user = await prisma.user.findUnique({
-      where: { id: userId },
+    // Resolve the actual Prisma user ID (handles Firebase UID → Prisma CUID mapping)
+    const dbUserId = await resolveDbUserId(userId, email)
+    if (!dbUserId) {
+      return null
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: dbUserId },
       include: {
         profile: true,
         roadmaps: {
@@ -27,40 +33,6 @@ async function getUserFromRequest(req: NextRequest) {
         },
       },
     })
-
-    // If user doesn't exist in DB (localStorage user), create a minimal record
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          id: userId,
-          email: `user_${userId}@localhost`,
-          name: `User ${userId.substring(0, 8)}`,
-          password: "", // Empty password since this is a placeholder user
-        },
-        include: {
-          profile: true,
-          roadmaps: {},
-        },
-      }).catch(() => null) // Ignore if user already exists (race condition)
-
-      // If creation failed, try to fetch again
-      if (!user) {
-        user = await prisma.user.findUnique({
-          where: { id: userId },
-          include: {
-            profile: true,
-            roadmaps: {
-              include: {
-                steps: true,
-                progress: true,
-              },
-              take: 1,
-              orderBy: { createdAt: "desc" },
-            },
-          },
-        })
-      }
-    }
 
     return user
   } catch (error) {

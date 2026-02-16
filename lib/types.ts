@@ -39,6 +39,9 @@ export interface Roadmap {
   careerPath: string
   overview: string
   estimatedTimeframe: string
+  order?: number
+  completedAt?: string | null
+  createdAt?: string
   steps: RoadmapStep[]
   weeklySchedule: {
     monday: string
@@ -51,11 +54,21 @@ export interface Roadmap {
   }
 }
 
+export interface StudyResource {
+  title: string
+  type: "video" | "article" | "pdf" | "documentation"
+  url: string
+  platform?: "youtube" | "medium" | "opensource" | "google"
+}
+
 export interface DailyTask {
+  id?: string
   time: string
   task: string
   duration: string
   type: "learning" | "practice" | "project" | "review"
+  completed?: boolean
+  resources?: StudyResource[]
 }
 
 export interface StudyPlan {

@@ -1,24 +1,37 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useAuth } from "@/lib/auth-context"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Navbar } from "@/components/navbar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Checkbox } from "@/components/ui/checkbox"
-import { BookOpen, CheckCircle2, Clock, ExternalLink, Loader2, Sparkles } from "lucide-react"
+import { BookOpen, CheckCircle2, Clock, ExternalLink, Loader2, Sparkles, Trophy, Rocket, PartyPopper, ArrowLeft } from "lucide-react"
 import { updateStepCompletion } from "@/lib/actions"
 import type { Roadmap } from "@/lib/types"
 
 export default function RoadmapPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
+      <RoadmapContent />
+    </Suspense>
+  )
+}
+
+function RoadmapContent() {
   const { user, isLoading: authLoading } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const viewId = searchParams.get("viewId")
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null)
   const [expandedStep, setExpandedStep] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState<string | null>(null)
+  const [isGeneratingNext, setIsGeneratingNext] = useState(false)
+  const [showCelebration, setShowCelebration] = useState(false)
+  const [isViewingCompleted, setIsViewingCompleted] = useState(false)
 
   const generateStudyPlan = async (step: any) => {
     if (!user || !roadmap) return
@@ -34,14 +47,10 @@ export default function RoadmapPage() {
       })
       const data = await response.json()
 
-      // Save to local storage for now (or could redirect to a view)
+      // Save to local storage with both step-specific and general keys
       localStorage.setItem(`studyPlan_${user.id}_${step.id}`, JSON.stringify(data.studyPlan))
+      localStorage.setItem(`studyPlan_${user.id}`, JSON.stringify(data.studyPlan))
 
-      // Simple alert for verification since we don't have a dedicated view page ready 
-      // and the user just wanted it to "work".
-      // Ideally we router.push(`/study-plan/${step.id}`) but that page doesn't exist.
-      // Let's just alert success for now or log it.
-      // Actually, let's navigate to the study-plan directory if it exists, earlier I saw it.
       router.push(`/study-plan?stepId=${step.id}`)
     } catch (e) {
       console.error(e)
@@ -57,14 +66,61 @@ export default function RoadmapPage() {
     }
 
     if (user) {
-      const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
-      if (storedRoadmap) {
-        setRoadmap(JSON.parse(storedRoadmap))
+      // If viewing a specific completed roadmap by ID
+      if (viewId) {
+        const fetchRoadmap = async () => {
+          try {
+            const response = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}&roadmapId=${viewId}`)
+            if (response.ok) {
+              const data = await response.json()
+              if (data.roadmap) {
+                setRoadmap(data.roadmap)
+                setIsViewingCompleted(!!data.roadmap.completedAt)
+                return
+              }
+            }
+          } catch (error) {
+            console.error("Error fetching roadmap by ID:", error)
+          }
+          // Fallback to dashboard
+          router.push("/dashboard")
+        }
+        fetchRoadmap()
       } else {
-        router.push("/dashboard")
+        // Fetch the latest active roadmap from the API
+        const fetchLatest = async () => {
+          try {
+            const response = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}`)
+            if (response.ok) {
+              const data = await response.json()
+              if (data.roadmap) {
+                setRoadmap(data.roadmap)
+                localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(data.roadmap))
+                if (data.roadmap.steps?.length > 0 && data.roadmap.steps.every((s: any) => s.completed)) {
+                  setShowCelebration(true)
+                }
+                return
+              }
+            }
+          } catch (error) {
+            console.error("Error fetching roadmap from API:", error)
+          }
+          // Fallback to localStorage
+          const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
+          if (storedRoadmap) {
+            const parsed = JSON.parse(storedRoadmap)
+            setRoadmap(parsed)
+            if (parsed.steps?.length > 0 && parsed.steps.every((s: any) => s.completed)) {
+              setShowCelebration(true)
+            }
+          } else {
+            router.push("/dashboard")
+          }
+        }
+        fetchLatest()
       }
     }
-  }, [user, authLoading, router])
+  }, [user, authLoading, router, viewId])
 
   const toggleStepCompletion = async (stepId: string) => {
     if (!roadmap || !user) return
@@ -77,6 +133,12 @@ export default function RoadmapPage() {
     setRoadmap(updatedRoadmap)
     localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(updatedRoadmap))
 
+    // Check if all steps are now completed
+    const allCompleted = updatedSteps.every((s) => s.completed)
+    if (allCompleted) {
+      setShowCelebration(true)
+    }
+
     // Try to save to database
     try {
       const step = updatedSteps.find(s => s.id === stepId)
@@ -85,6 +147,48 @@ export default function RoadmapPage() {
       }
     } catch (error) {
       console.warn("Failed to save step completion to database:", error)
+    }
+  }
+
+  const generateNextRoadmap = async () => {
+    if (!user || !roadmap) return
+    setIsGeneratingNext(true)
+    try {
+      const profile = JSON.parse(localStorage.getItem(`profile_${user.id}`) || "{}")
+      const response = await fetch("/api/generate-next-roadmap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profile,
+          completedRoadmap: roadmap,
+          userId: user.id,
+          email: user.email,
+        }),
+      })
+      const data = await response.json()
+
+      if (data.roadmap) {
+        const nextRoadmap = {
+          ...data.roadmap,
+          completedAt: null,
+          steps: data.roadmap.steps.map((step: any) => ({
+            ...step,
+            completed: false,
+            progress: 0,
+            skills: Array.isArray(step.skills) ? step.skills : [],
+            resources: Array.isArray(step.resources) ? step.resources : [],
+            milestones: Array.isArray(step.milestones) ? step.milestones : [],
+          })),
+        }
+
+        setRoadmap(nextRoadmap)
+        setShowCelebration(false)
+        localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(nextRoadmap))
+      }
+    } catch (error) {
+      console.error("Error generating next roadmap:", error)
+    } finally {
+      setIsGeneratingNext(false)
     }
   }
 
@@ -103,6 +207,25 @@ export default function RoadmapPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
       <Navbar />
       <main className="container mx-auto px-4 py-8">
+        {/* Viewing Completed Roadmap Banner */}
+        {isViewingCompleted && (
+          <div className="mb-6 flex items-center gap-4 rounded-lg border border-green-200 bg-green-50 p-4">
+            <Button variant="outline" size="sm" onClick={() => router.push("/dashboard")} className="shrink-0">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Dashboard
+            </Button>
+            <div className="flex items-center gap-2">
+              <Trophy className="h-5 w-5 text-green-600" />
+              <span className="font-medium text-green-800">Viewing Completed Roadmap</span>
+              {roadmap.completedAt && (
+                <Badge variant="secondary" className="bg-green-100 text-green-700">
+                  Completed {new Date(roadmap.completedAt).toLocaleDateString()}
+                </Badge>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="mb-8">
           <h1 className="text-balance mb-2 text-3xl font-bold">{roadmap.careerPath} Roadmap</h1>
           <p className="text-balance text-muted-foreground">{roadmap.overview}</p>
@@ -137,7 +260,12 @@ export default function RoadmapPage() {
                     <CardDescription className="text-balance mt-1">{step.description}</CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Checkbox checked={step.completed} onCheckedChange={() => toggleStepCompletion(step.id)} />
+                    {!isViewingCompleted && (
+                      <Checkbox checked={step.completed} onCheckedChange={() => toggleStepCompletion(step.id)} />
+                    )}
+                    {isViewingCompleted && step.completed && (
+                      <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -150,34 +278,26 @@ export default function RoadmapPage() {
                   >
                     {expandedStep === step.id ? "Hide Details" : "Show Details"}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      // In a real app we'd navigate to a study plan page or open a modal
-                      // For now let's just trigger the API to verify it works (and maybe alert)
-                      // Or better, navigate to a new page /study-plan/[stepId]
-                      // But since I don't want to build a whole new page right now, 
-                      // I will add a simple "Generate Study Plan" that saves to local storage and alerts for now,
-                      // or just add a visual indicator.
-                      // Wait, the robust plan suggested "Connect UI to API". 
-                      // Let's implement a proper handler.
-                      generateStudyPlan(step)
-                    }}
-                    disabled={isGenerating === step.id}
-                  >
-                    {isGenerating === step.id ? (
-                      <>
-                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="mr-2 h-3 w-3" />
-                        Generate Study Plan
-                      </>
-                    )}
-                  </Button>
+                  {!isViewingCompleted && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => generateStudyPlan(step)}
+                      disabled={isGenerating === step.id}
+                    >
+                      {isGenerating === step.id ? (
+                        <>
+                          <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="mr-2 h-3 w-3" />
+                          Generate Study Plan
+                        </>
+                      )}
+                    </Button>
+                  )}
                 </div>
 
                 {expandedStep === step.id && (
@@ -240,6 +360,59 @@ export default function RoadmapPage() {
             </Card>
           ))}
         </div>
+
+        {/* Celebration & Next Roadmap Section */}
+        {!isViewingCompleted && (overallProgress === 100 || showCelebration) && (
+          <Card className="mt-8 border-2 border-yellow-400 bg-gradient-to-r from-yellow-50 via-amber-50 to-orange-50">
+            <CardHeader className="text-center">
+              <div className="flex justify-center gap-3 text-4xl mb-4">
+                <PartyPopper className="h-10 w-10 text-yellow-500" />
+                <Trophy className="h-10 w-10 text-yellow-500" />
+                <PartyPopper className="h-10 w-10 text-yellow-500" />
+              </div>
+              <CardTitle className="text-2xl text-yellow-800">
+                🎉 Congratulations! Roadmap Completed!
+              </CardTitle>
+              <CardDescription className="text-yellow-700 text-base mt-2">
+                You&apos;ve completed all steps in your <strong>{roadmap.careerPath}</strong> roadmap! 
+                Ready to take your skills to the next level?
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <div className="flex items-center justify-center gap-6 text-sm text-yellow-700">
+                <div className="flex items-center gap-1">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>{roadmap.steps.length} steps completed</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Clock className="h-4 w-4" />
+                  <span>Roadmap {roadmap.order || 1}</span>
+                </div>
+              </div>
+              <Button
+                size="lg"
+                onClick={generateNextRoadmap}
+                disabled={isGeneratingNext}
+                className="bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white shadow-lg"
+              >
+                {isGeneratingNext ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Generating Next Roadmap...
+                  </>
+                ) : (
+                  <>
+                    <Rocket className="mr-2 h-5 w-5" />
+                    Generate Next Roadmap
+                  </>
+                )}
+              </Button>
+              <p className="text-xs text-yellow-600">
+                Your next roadmap will build on what you&apos;ve already learned with more advanced topics
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="mt-8">
           <CardHeader>

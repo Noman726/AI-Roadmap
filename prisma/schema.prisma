@@ -46,6 +46,8 @@ model Roadmap {
   overview        String
   estimatedTimeframe String
   weeklySchedule  String     // JSON string
+  order           Int        @default(1)
+  completedAt     DateTime?
   steps           Step[]
   progress        Progress[]
   createdAt       DateTime   @default(now())
@@ -78,6 +80,8 @@ model Progress {
   studyPlan       String?  // JSON string of weekly study plan
   lastUpdated     DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@unique([userId, roadmapId])
 }
 
 model Notification {

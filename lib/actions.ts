@@ -54,10 +54,18 @@ export async function saveProfile(userId: string, profileData: any) {
 
 export async function saveRoadmap(userId: string, roadmapData: any) {
   try {
-    // First, delete existing roadmaps for this user
-    await db.roadmap.deleteMany({
+    // Find the highest order for this user's existing roadmaps
+    const lastRoadmap = await db.roadmap.findFirst({
       where: { userId },
+      orderBy: { order: "desc" },
     })
+    const nextOrder = (lastRoadmap?.order || 0) + 1
+
+    // If this is the first roadmap (order 1), delete any existing ones
+    // to avoid duplicates from regenerating the initial roadmap
+    if (nextOrder === 1 || !lastRoadmap) {
+      await db.roadmap.deleteMany({ where: { userId } })
+    }
 
     // Create new roadmap with steps
     const roadmap = await db.roadmap.create({
@@ -67,6 +75,7 @@ export async function saveRoadmap(userId: string, roadmapData: any) {
         overview: roadmapData.overview,
         estimatedTimeframe: roadmapData.estimatedTimeframe,
         weeklySchedule: JSON.stringify(roadmapData.weeklySchedule),
+        order: lastRoadmap ? nextOrder : 1,
         steps: {
           create: roadmapData.steps.map((step: any) => ({
             title: step.title,
@@ -102,8 +111,10 @@ export async function saveRoadmap(userId: string, roadmapData: any) {
 
 export async function getUserRoadmap(userId: string) {
   try {
+    // Get the latest (most recent / highest order) active roadmap
     const roadmap = await db.roadmap.findFirst({
-      where: { userId },
+      where: { userId, completedAt: null },
+      orderBy: { order: "desc" },
       include: {
         steps: true,
       },

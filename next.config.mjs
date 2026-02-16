@@ -4,8 +4,16 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    unoptimized: true,
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**',
+      },
+    ],
   },
+  compress: true,
+  reactStrictMode: true,
+  swcMinify: true,
 }
 
 export default nextConfig

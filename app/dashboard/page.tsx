@@ -7,7 +7,8 @@ import { Navbar } from "@/components/navbar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import { Sparkles, Target, BookOpen, TrendingUp, ArrowRight, Loader2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Sparkles, Target, BookOpen, TrendingUp, ArrowRight, Loader2, Trophy, CheckCircle2 } from "lucide-react"
 import { getUserRoadmap } from "@/lib/actions"
 import type { Profile, Roadmap } from "@/lib/types"
 
@@ -16,6 +17,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null)
+  const [completedRoadmaps, setCompletedRoadmaps] = useState<Roadmap[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [overallProgress, setOverallProgress] = useState(0)
 
@@ -35,35 +37,100 @@ export default function DashboardPage() {
         return
       }
 
-      // Load roadmap
+      // Load roadmap from server first, then fallback to localStorage
       const loadRoadmap = async () => {
+        try {
+          // Fetch all roadmaps (history) from API
+          const historyRes = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}&history=true`)
+          if (historyRes.ok) {
+            const { roadmaps } = await historyRes.json()
+            if (roadmaps && roadmaps.length > 0) {
+              // Separate completed and active roadmaps
+              const completed = roadmaps.filter((r: any) => r.completedAt !== null)
+              const active = roadmaps.filter((r: any) => r.completedAt === null)
+              setCompletedRoadmaps(completed)
+
+              // Use the latest active roadmap, or the most recent completed one
+              const current = active.length > 0
+                ? active[active.length - 1]
+                : roadmaps[roadmaps.length - 1]
+
+              setRoadmap(current)
+              calculateProgress(current)
+              localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(current))
+              return
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching roadmaps from API:", error)
+        }
+
+        // Fallback: try single roadmap API
+        try {
+          const response = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}`)
+          if (response.ok) {
+            const { roadmap: apiRoadmap } = await response.json()
+            setRoadmap(apiRoadmap)
+            calculateProgress(apiRoadmap)
+            localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(apiRoadmap))
+            return
+          }
+        } catch (error) {
+          console.error("Error fetching roadmap from API:", error)
+        }
+
+        // Fallback to server action
         try {
           const dbRoadmap = await getUserRoadmap(user.id)
           if (dbRoadmap) {
             setRoadmap(dbRoadmap)
             calculateProgress(dbRoadmap)
-          } else {
-            const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
-            if (storedRoadmap) {
-              const roadmapData = JSON.parse(storedRoadmap)
-              setRoadmap(roadmapData)
-              calculateProgress(roadmapData)
-            }
+            return
           }
         } catch (error) {
-          // Fallback to localStorage
-          const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
-          if (storedRoadmap) {
-            const roadmapData = JSON.parse(storedRoadmap)
-            setRoadmap(roadmapData)
-            calculateProgress(roadmapData)
-          }
+          console.error("Error fetching roadmap:", error)
+        }
+
+        // Fallback to localStorage
+        const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
+        if (storedRoadmap) {
+          const roadmapData = JSON.parse(storedRoadmap)
+          setRoadmap(roadmapData)
+          calculateProgress(roadmapData)
         }
       }
 
       loadRoadmap()
     }
   }, [user, authLoading, router])
+
+  // Periodically refresh roadmap to get latest progress (30s for efficiency)
+  useEffect(() => {
+    if (!user) return
+
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}&history=true`)
+        if (response.ok) {
+          const { roadmaps } = await response.json()
+          if (roadmaps && roadmaps.length > 0) {
+            const completed = roadmaps.filter((r: any) => r.completedAt !== null)
+            const active = roadmaps.filter((r: any) => r.completedAt === null)
+            setCompletedRoadmaps(completed)
+            const current = active.length > 0
+              ? active[active.length - 1]
+              : roadmaps[roadmaps.length - 1]
+            setRoadmap(current)
+            calculateProgress(current)
+          }
+        }
+      } catch (error) {
+        console.error("Error refreshing roadmap:", error)
+      }
+    }, 30000) // Refresh every 30 seconds
+
+    return () => clearInterval(interval)
+  }, [user])
 
   const calculateProgress = (roadmapData: Roadmap) => {
     if (!roadmapData.steps.length) return
@@ -262,6 +329,56 @@ export default function DashboardPage() {
                 </Button>
               </CardContent>
             </Card>
+
+            {/* Completed Roadmaps History */}
+            {completedRoadmaps.length > 0 && (
+              <Card className="mt-6">
+                <CardHeader>
+                  <CardTitle className="text-balance flex items-center gap-2">
+                    <Trophy className="h-5 w-5 text-yellow-500" />
+                    Completed Roadmaps
+                  </CardTitle>
+                  <CardDescription className="text-balance">
+                    Your learning journey so far — {completedRoadmaps.length} roadmap{completedRoadmaps.length > 1 ? "s" : ""} completed
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {completedRoadmaps.map((cr, idx) => (
+                      <div
+                        key={cr.id || idx}
+                        className="flex items-center gap-4 rounded-lg border border-green-200 bg-green-50 p-4 cursor-pointer hover:bg-green-100 hover:border-green-300 transition-colors"
+                        onClick={() => router.push(`/roadmap?viewId=${cr.id}`)}
+                      >
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-500 text-white font-bold text-sm">
+                          <CheckCircle2 className="h-5 w-5" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-balance font-medium">{cr.careerPath}</h4>
+                            <Badge variant="secondary" className="bg-green-100 text-green-700">
+                              Roadmap {cr.order || idx + 1}
+                            </Badge>
+                          </div>
+                          <p className="text-balance text-sm text-muted-foreground">
+                            {cr.steps.length} steps completed • {cr.estimatedTimeframe}
+                          </p>
+                          {cr.completedAt && (
+                            <p className="text-xs text-green-600 mt-1">
+                              Completed on {new Date(cr.completedAt).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-green-500 text-white">100%</Badge>
+                          <ArrowRight className="h-4 w-4 text-green-600" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </>
         )}
       </main>
