@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Calendar, Clock, BookOpen, Target, Loader2, AlertCircle } from "lucide-react"
 import { saveStudyPlan } from "@/lib/actions"
+import { useNotifications } from "@/lib/notification-context"
+import { NotificationAlert } from "@/components/notification-alert"
 import type { Roadmap } from "@/lib/types"
 
 interface StudyPlan {
@@ -33,10 +35,16 @@ const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "sat
 export default function StudyPlanPage() {
   const { user, isLoading: authLoading } = useAuth()
   const router = useRouter()
+  const { createNotification } = useNotifications()
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null)
   const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [selectedDay, setSelectedDay] = useState("monday")
+  const [notification, setNotification] = useState<{
+    type: "success" | "error" | "warning" | "info"
+    title: string
+    description?: string
+  } | null>(null)
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -64,7 +72,11 @@ export default function StudyPlanPage() {
     try {
       const currentStep = roadmap.steps.find((s) => !s.completed)
       if (!currentStep) {
-        alert("All steps completed! Great job!")
+        setNotification({
+          type: "success",
+          title: "All Steps Completed!",
+          description: "You've completed all steps in your learning roadmap. Great job!",
+        })
         return
       }
 
@@ -89,6 +101,24 @@ export default function StudyPlanPage() {
       setStudyPlan(data.studyPlan)
       localStorage.setItem(`studyPlan_${user.id}`, JSON.stringify(data.studyPlan))
 
+      // Create a notification for the study plan
+      await createNotification({
+        type: "study_plan",
+        title: `Your Weekly Study Plan is Ready!`,
+        message: `AI has created a personalized study plan for "${currentStep.title}". Check your daily schedules to get started!`,
+        metadata: {
+          focusArea: data.studyPlan.focusArea,
+          weekStart: data.studyPlan.weekStart,
+        },
+      })
+
+      // Show success notification
+      setNotification({
+        type: "success",
+        title: "Study Plan Generated Successfully!",
+        description: `Your personalized study plan for "${currentStep.title}" is ready. Follow the daily schedule to stay on track!`,
+      })
+
       // Try to save to database
       try {
         await saveStudyPlan(user.id, roadmap.id || "default", data.studyPlan)
@@ -97,6 +127,11 @@ export default function StudyPlanPage() {
       }
     } catch (error) {
       console.error("Error generating study plan:", error)
+      setNotification({
+        type: "error",
+        title: "Failed to Generate Study Plan",
+        description: "An error occurred while generating your study plan. Please try again.",
+      })
     } finally {
       setIsGenerating(false)
     }
@@ -116,6 +151,19 @@ export default function StudyPlanPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
       <Navbar />
       <main className="container mx-auto px-4 py-8">
+        {notification && (
+          <div className="mb-6">
+            <NotificationAlert
+              type={notification.type}
+              title={notification.title}
+              description={notification.description}
+              onClose={() => setNotification(null)}
+              autoClose={true}
+              autoCloseDuration={5000}
+            />
+          </div>
+        )}
+
         <div className="mb-8">
           <h1 className="text-balance mb-2 text-3xl font-bold">Weekly Study Plan</h1>
           <p className="text-balance text-muted-foreground">

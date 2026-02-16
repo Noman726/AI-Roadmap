@@ -13,6 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { NotificationBell } from "@/components/notification-bell"
 
 export function Navbar() {
   const { user, logout } = useAuth()
@@ -29,6 +30,7 @@ export function Navbar() {
     { href: "/roadmap", label: "Roadmap" },
     { href: "/progress", label: "Progress" },
     { href: "/study-plan", label: "Study Plan" },
+    { href: "/chat", label: "Chat" },
   ]
 
   return (
@@ -56,26 +58,29 @@ export function Navbar() {
         </div>
 
         {user && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="rounded-full">
-                <User className="h-5 w-5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>
-                <div className="flex flex-col">
-                  <span className="font-medium">{user.name}</span>
-                  <span className="text-xs text-muted-foreground font-normal">{user.email}</span>
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout}>
-                <LogOut className="mr-2 h-4 w-4" />
-                Sign Out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full">
+                  <User className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>
+                  <div className="flex flex-col">
+                    <span className="font-medium">{user.name}</span>
+                    <span className="text-xs text-muted-foreground font-normal">{user.email}</span>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Sign Out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         )}
       </div>
     </header>

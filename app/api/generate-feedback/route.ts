@@ -1,4 +1,5 @@
 import { generateText } from "ai"
+import { groq } from "@ai-sdk/groq"
 
 export async function POST(req: Request) {
   const { profile, completedSteps, currentProgress } = await req.json()
@@ -23,7 +24,7 @@ Provide:
 Keep it encouraging, specific, and personal. Use a friendly, supportive tone.`
 
   const { text } = await generateText({
-    model: "openai:gpt-4o-mini",
+    model: groq("llama-3.3-70b-versatile"),
     prompt,
     maxOutputTokens: 500,
   })

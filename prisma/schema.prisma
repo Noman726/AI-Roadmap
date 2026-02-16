@@ -11,15 +11,17 @@ datasource db {
 }
 
 model User {
-  id        String     @id @default(cuid())
-  email     String     @unique
-  name      String
-  password  String
-  profile   Profile?
-  roadmaps  Roadmap[]
-  progress  Progress[]
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id            String     @id @default(cuid())
+  email         String     @unique
+  name          String
+  password      String
+  profile       Profile?
+  roadmaps      Roadmap[]
+  progress      Progress[]
+  notifications Notification[]
+  chatMessages  ChatMessage[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 }
 
 model Profile {
@@ -76,4 +78,27 @@ model Progress {
   studyPlan       String?  // JSON string of weekly study plan
   lastUpdated     DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // 'study_plan', 'milestone', 'reminder', etc.
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  metadata  String?  // JSON string for additional data like studyPlanId, stepId
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   // 'user' or 'assistant'
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

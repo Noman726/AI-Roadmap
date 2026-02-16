@@ -2,11 +2,17 @@
 
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
-import { signup as serverSignup } from "./actions"
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+} from "firebase/auth"
+import { auth } from "./firebase"
 
 interface User {
   id: string
-  email: string
+  email: string | null
   name: string
 }
 
@@ -14,7 +20,7 @@ interface AuthContextType {
   user: User | null
   login: (email: string, password: string) => Promise<void>
   signup: (email: string, password: string, name: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   isLoading: boolean
 }
 
@@ -25,24 +31,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("user")
-    if (storedUser) {
-      setUser(JSON.parse(storedUser))
-    }
-    setIsLoading(false)
+    // Listen for auth state changes
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          id: firebaseUser.uid,
+          email: firebaseUser.email,
+          name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+        })
+      } else {
+        setUser(null)
+      }
+      setIsLoading(false)
+    })
+
+    return () => unsubscribe()
   }, [])
 
   const login = async (email: string, password: string) => {
     setIsLoading(true)
     try {
-      // Simulate API call
-      const mockUser = {
-        id: Date.now().toString(),
-        email,
-        name: email.split("@")[0],
-      }
-      setUser(mockUser)
-      localStorage.setItem("user", JSON.stringify(mockUser))
+      const result = await signInWithEmailAndPassword(auth, email, password)
+      setUser({
+        id: result.user.uid,
+        email: result.user.email,
+        name: result.user.displayName || email.split("@")[0],
+      })
     } finally {
       setIsLoading(false)
     }
@@ -51,26 +65,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signup = async (email: string, password: string, name: string) => {
     setIsLoading(true)
     try {
-      const result = await serverSignup(email, password, name)
-      if (result?.error) {
-        throw new Error(result.error)
-      }
-      const newUser = {
-        id: result?.userId || Date.now().toString(),
-        email,
-        name,
-      }
-      setUser(newUser)
-      localStorage.setItem("user", JSON.stringify(newUser))
+      // Create user in Firebase Auth
+      const result = await createUserWithEmailAndPassword(auth, email, password)
+
+      setUser({
+        id: result.user.uid,
+        email: result.user.email,
+        name: name,
+      })
+
+      // Save user profile to Firestore (via API)
+      await fetch("/api/auth/create-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid: result.user.uid,
+          email,
+          name,
+        }),
+      })
     } finally {
       setIsLoading(false)
     }
   }
 
-  const logout = () => {
-    setUser(null)
-    localStorage.removeItem("user")
-    localStorage.clear()
+  const logout = async () => {
+    setIsLoading(true)
+    try {
+      await signOut(auth)
+      setUser(null)
+      localStorage.clear()
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
