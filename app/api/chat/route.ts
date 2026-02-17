@@ -134,6 +134,10 @@ export async function POST(req: NextRequest) {
     // Prepare context from user's roadmap and profile
     const currentRoadmap = user.roadmaps[0] || roadmap || null
     const userProfile = user.profile || profile || null
+    const currentSteps = Array.isArray(currentRoadmap?.steps) ? currentRoadmap.steps : []
+    const completedStepsFromProgress = Array.isArray(currentRoadmap?.progress)
+      ? Number(currentRoadmap.progress[0]?.completedSteps || 0)
+      : Number(currentRoadmap?.completedSteps || 0)
 
     const systemPrompt = `You are a helpful and supportive AI learning assistant for students. Your role is to:
 1. Help students understand their learning roadmap and study plans
@@ -155,12 +159,12 @@ ${
     ? `Current Learning Path:
 - Career Path: ${currentRoadmap.careerPath}
 - Overview: ${currentRoadmap.overview}
-- Total Steps: ${currentRoadmap.steps.length}
-- Status: ${currentRoadmap.progress[0]?.completedSteps || 0} / ${currentRoadmap.steps.length} steps completed
+- Total Steps: ${currentSteps.length}
+- Status: ${completedStepsFromProgress} / ${currentSteps.length} steps completed
 
 Current Focus Step:
 ${
-  currentRoadmap.steps.find((s) => Array.isArray(s.milestones) && s.milestones.length > 0)?.title || "Starting the journey"
+  currentSteps.find((s) => Array.isArray(s.milestones) && s.milestones.length > 0)?.title || "Starting the journey"
 }
 `
     : ""
