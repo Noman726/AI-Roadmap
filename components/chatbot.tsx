@@ -36,6 +36,8 @@ export function Chatbot({
   const [isInitialized, setIsInitialized] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  const getLocalHistoryKey = (userId: string) => `chatHistory_${userId}`
+
   // Load chat history on mount
   useEffect(() => {
     const loadChatHistory = async () => {
@@ -44,13 +46,27 @@ export function Chatbot({
         return
       }
 
+      const localHistory = localStorage.getItem(getLocalHistoryKey(user.id))
+      if (localHistory) {
+        try {
+          const parsed = JSON.parse(localHistory)
+          if (Array.isArray(parsed)) {
+            setMessages(parsed)
+          }
+        } catch (error) {
+          console.warn("Failed to parse local chat history:", error)
+        }
+      }
+
       try {
         const response = await fetch("/api/chat", {
           headers: { "x-user-id": user.id },
         })
         if (response.ok) {
           const { messages: historyMessages } = await response.json()
-          setMessages(historyMessages)
+          if (Array.isArray(historyMessages) && historyMessages.length > 0) {
+            setMessages(historyMessages)
+          }
         }
       } catch (error) {
         console.error("Failed to load chat history:", error)
@@ -69,6 +85,16 @@ export function Chatbot({
     }
   }, [messages])
 
+  useEffect(() => {
+    if (!user?.id) return
+
+    try {
+      localStorage.setItem(getLocalHistoryKey(user.id), JSON.stringify(messages.slice(-100)))
+    } catch (error) {
+      console.warn("Failed to persist local chat history:", error)
+    }
+  }, [messages, user?.id])
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -84,13 +110,21 @@ export function Chatbot({
     setIsLoading(true)
 
     try {
+      const profile = localStorage.getItem(`profile_${user.id}`)
+      const roadmap = localStorage.getItem(`roadmap_${user.id}`)
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-user-id": user.id,
         },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({
+          message: input,
+          profile: profile ? JSON.parse(profile) : null,
+          roadmap: roadmap ? JSON.parse(roadmap) : null,
+          history: messages.slice(-8).map((msg) => ({ role: msg.role, content: msg.content })),
+        }),
       })
 
       if (response.ok) {
@@ -102,12 +136,19 @@ export function Chatbot({
         }
         setMessages((prev) => [...prev, assistantMessage])
       } else {
+        let errorMessage = "Sorry, I encountered an error. Please try again later."
+        try {
+          const errorData = await response.json()
+          if (errorData?.details) {
+            errorMessage = `Sorry, chatbot failed: ${errorData.details}`
+          }
+        } catch {}
+
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content:
-              "Sorry, I encountered an error. Please try again later.",
+            content: errorMessage,
           },
         ])
       }

@@ -19,9 +19,11 @@ export default function ProgressPage() {
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null)
   const [feedback, setFeedback] = useState<string>("")
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false)
+  const [isRoadmapLoading, setIsRoadmapLoading] = useState(true)
 
   useEffect(() => {
     if (!authLoading && !user) {
+      setIsRoadmapLoading(false)
       router.push("/login")
       return
     }
@@ -45,6 +47,8 @@ export default function ProgressPage() {
             const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
             if (storedRoadmap) {
               setRoadmap(JSON.parse(storedRoadmap))
+            } else {
+              setRoadmap(null)
             }
           }
         } catch (error) {
@@ -52,11 +56,17 @@ export default function ProgressPage() {
           const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
           if (storedRoadmap) {
             setRoadmap(JSON.parse(storedRoadmap))
+          } else {
+            setRoadmap(null)
           }
+        } finally {
+          setIsRoadmapLoading(false)
         }
       }
 
       fetchRoadmap()
+    } else if (!authLoading) {
+      setIsRoadmapLoading(false)
     }
   }, [user, authLoading, router])
 
@@ -86,7 +96,16 @@ export default function ProgressPage() {
     setIsLoadingFeedback(true)
     try {
       const completedSteps = roadmap.steps.filter((s) => s.completed).length
-      const currentProgress = Math.round((completedSteps / roadmap.steps.length) * 100)
+      const currentProgress = roadmap.steps.length
+        ? Math.round(
+            roadmap.steps.reduce((sum, step) => {
+              const stepProgress = typeof step.progress === "number"
+                ? step.progress
+                : (step.completed ? 100 : 0)
+              return sum + stepProgress
+            }, 0) / roadmap.steps.length
+          )
+        : 0
 
       const response = await fetch("/api/generate-feedback", {
         method: "POST",
@@ -114,7 +133,7 @@ export default function ProgressPage() {
     }
   }
 
-  if (authLoading || !user || !roadmap) {
+  if (authLoading || (isRoadmapLoading && !!user)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -122,9 +141,46 @@ export default function ProgressPage() {
     )
   }
 
+  if (!user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!roadmap) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+        <Navbar />
+        <main className="container mx-auto px-4 py-8">
+          <Card className="mx-auto max-w-2xl">
+            <CardHeader>
+              <CardTitle>No Progress Yet</CardTitle>
+              <CardDescription>Generate a roadmap first from the dashboard to start tracking progress.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex gap-2">
+              <Button onClick={() => router.push("/dashboard")}>Go to Dashboard</Button>
+              <Button variant="outline" onClick={() => window.location.reload()}>Retry</Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    )
+  }
+
   const completedSteps = roadmap.steps.filter((s) => s.completed).length
   const totalSteps = roadmap.steps.length
-  const overallProgress = Math.round((completedSteps / totalSteps) * 100)
+  const overallProgress = totalSteps
+    ? Math.round(
+        roadmap.steps.reduce((sum, step) => {
+          const stepProgress = typeof step.progress === "number"
+            ? step.progress
+            : (step.completed ? 100 : 0)
+          return sum + stepProgress
+        }, 0) / totalSteps
+      )
+    : 0
 
   const completedSkills = roadmap.steps
     .filter((s) => s.completed)

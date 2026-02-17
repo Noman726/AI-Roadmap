@@ -40,6 +40,35 @@ interface StudyPlan {
 
 const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
+const parseDurationToMinutes = (duration: string): number => {
+  if (!duration) return 0
+
+  const value = duration.trim().toLowerCase()
+
+  const hoursMatch = value.match(/(\d+)\s*h/)
+  const minutesMatch = value.match(/(\d+)\s*m/)
+
+  if (hoursMatch || minutesMatch) {
+    const hours = hoursMatch ? Number.parseInt(hoursMatch[1], 10) : 0
+    const minutes = minutesMatch ? Number.parseInt(minutesMatch[1], 10) : 0
+    return hours * 60 + minutes
+  }
+
+  const numeric = Number.parseInt(value, 10)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+const formatMinutesAsHours = (totalMinutes: number): string => {
+  if (totalMinutes <= 0) return "0m"
+
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+
+  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`
+  if (hours > 0) return `${hours}h`
+  return `${minutes}m`
+}
+
 export default function StudyPlanPage() {
   return (
     <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
@@ -72,15 +101,25 @@ function StudyPlanContent() {
     if (!user || !studyPlan) return
 
     const taskId = `${day}-${taskIndex}`
+    if (completedTasks.has(taskId)) return
+    const nextCompletedTasks = new Set(completedTasks)
+    nextCompletedTasks.add(taskId)
+    const currentStepForTask = targetStepId
+      ? roadmap?.steps.find((s) => s.id === targetStepId)
+      : roadmap?.steps.find((s) => !s.completed)
+    const stepScopedTasksKey = currentStepForTask?.id
+      ? `completedTasks_${user.id}_${currentStepForTask.id}`
+      : `completedTasks_${user.id}`
     
     // Optimistic update
-    setCompletedTasks(prev => new Set([...prev, taskId]))
+    setCompletedTasks(nextCompletedTasks)
+    localStorage.setItem(stepScopedTasksKey, JSON.stringify(Array.from(nextCompletedTasks)))
     setIsMarkingComplete(taskId)
 
     try {
       // Calculate total tasks across all days
       const totalTasks = daysOfWeek.reduce((total, d) => total + (studyPlan.dailyPlans[d]?.length || 0), 0)
-      const newCompletedCount = completedTasks.size + 1
+      const newCompletedCount = nextCompletedTasks.size
 
       const response = await fetch("/api/mark-task-completed", {
         method: "POST",
@@ -90,6 +129,7 @@ function StudyPlanContent() {
           email: user.email,
           day,
           taskIndex,
+          stepId: currentStepForTask?.id,
           focusArea: studyPlan.focusArea,
           completedTasksCount: newCompletedCount,
           totalTasksCount: totalTasks,
@@ -133,11 +173,10 @@ function StudyPlanContent() {
     } catch (error) {
       console.error("Error marking task as completed:", error)
       // Revert on error
-      setCompletedTasks(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(taskId)
-        return newSet
-      })
+      const revertedTasks = new Set(nextCompletedTasks)
+      revertedTasks.delete(taskId)
+      setCompletedTasks(revertedTasks)
+      localStorage.setItem(stepScopedTasksKey, JSON.stringify(Array.from(revertedTasks)))
       setNotification({
         type: "error",
         title: "Error",
@@ -232,8 +271,11 @@ function StudyPlanContent() {
       setStudyPlan(null)
     }
 
-    // Load completed tasks for this step
-    const storedCompletedTasks = localStorage.getItem(`completedTasks_${user.id}`)
+    // Load completed tasks for this step (step-specific first, then fallback)
+    const completedTasksKey = activeStepId ? `completedTasks_${user.id}_${activeStepId}` : `completedTasks_${user.id}`
+    const storedCompletedTasks =
+      localStorage.getItem(completedTasksKey) ||
+      localStorage.getItem(`completedTasks_${user.id}`)
     if (storedCompletedTasks) {
       try {
         setCompletedTasks(new Set(JSON.parse(storedCompletedTasks)))
@@ -246,13 +288,24 @@ function StudyPlanContent() {
   }, [user, roadmap, targetStepId])
 
   useEffect(() => {
-    if (user && completedTasks.size > 0) {
+    if (user) {
+      const currentStep = targetStepId
+        ? roadmap?.steps.find((s) => s.id === targetStepId)
+        : roadmap?.steps.find((s) => !s.completed)
+
+      if (currentStep?.id) {
+        localStorage.setItem(
+          `completedTasks_${user.id}_${currentStep.id}`,
+          JSON.stringify(Array.from(completedTasks))
+        )
+      }
+
       localStorage.setItem(
         `completedTasks_${user.id}`,
         JSON.stringify(Array.from(completedTasks))
       )
     }
-  }, [user, completedTasks])
+  }, [user, completedTasks, roadmap, targetStepId])
 
   const markStepAsComplete = async () => {
     if (!user || !roadmap || !studyPlan) return
@@ -540,16 +593,17 @@ function StudyPlanContent() {
                     </CardHeader>
                     <CardContent>
                       <div className="text-sm">
-                        {daysOfWeek.reduce((total, day) => {
-                          return (
-                            total +
-                            studyPlan.dailyPlans[day].reduce((dayTotal: number, task: any) => {
-                              const hours = parseInt(task.duration) || 0
-                              return dayTotal + hours
-                            }, 0)
-                          )
-                        }, 0)}{" "}
-                        hours/week
+                        {formatMinutesAsHours(
+                          daysOfWeek.reduce((total, day) => {
+                            return (
+                              total +
+                              studyPlan.dailyPlans[day].reduce((dayTotal: number, task: any) => {
+                                return dayTotal + parseDurationToMinutes(task.duration)
+                              }, 0)
+                            )
+                          }, 0)
+                        )}
+                        /week
                       </div>
                       <p className="text-balance mt-2 text-xs text-muted-foreground">
                         Balanced across the week
@@ -579,11 +633,11 @@ function StudyPlanContent() {
                               <CardDescription>Your daily learning activities</CardDescription>
                             </div>
                             <Badge variant="secondary">
-                              {studyPlan.dailyPlans[day].reduce((total: number, task: any) => {
-                                const hours = parseInt(task.duration) || 0
-                                return total + hours
-                              }, 0)}{" "}
-                              hours
+                              {formatMinutesAsHours(
+                                studyPlan.dailyPlans[day].reduce((total: number, task: any) => {
+                                  return total + parseDurationToMinutes(task.duration)
+                                }, 0)
+                              )}
                             </Badge>
                           </div>
                         </CardHeader>

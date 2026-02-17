@@ -6,6 +6,7 @@ interface TaskCompletionRequest {
   email?: string
   day: string
   taskIndex: number
+  stepId?: string
   focusArea: string
   completedTasksCount: number
   totalTasksCount: number
@@ -14,7 +15,7 @@ interface TaskCompletionRequest {
 export async function POST(request: NextRequest) {
   try {
     const body: TaskCompletionRequest = await request.json()
-    const { userId, day, taskIndex, focusArea, completedTasksCount, totalTasksCount } = body
+    const { userId, day, taskIndex, stepId, focusArea, completedTasksCount, totalTasksCount } = body
 
     if (!userId || !day || taskIndex === undefined || completedTasksCount === undefined || totalTasksCount === undefined) {
       return NextResponse.json(
@@ -38,6 +39,9 @@ export async function POST(request: NextRequest) {
       const steps = stepsSnapshot.docs
 
       const currentStep =
+        (stepId
+          ? steps.find((doc) => String(doc.data().id || doc.id) === stepId)
+          : null) ||
         steps.find((doc) =>
           String(doc.data().title || "").toLowerCase().includes(focusArea.toLowerCase())
         ) ||

@@ -40,6 +40,7 @@ function RoadmapContent() {
   const [isChangingCareer, setIsChangingCareer] = useState(false)
   const [newCareerGoal, setNewCareerGoal] = useState("")
   const [newSkillLevel, setNewSkillLevel] = useState("")
+  const [isRoadmapLoading, setIsRoadmapLoading] = useState(true)
 
   const generateStudyPlan = async (step: any) => {
     if (!user || !roadmap) return
@@ -69,6 +70,7 @@ function RoadmapContent() {
 
   useEffect(() => {
     if (!authLoading && !user) {
+      setIsRoadmapLoading(false)
       router.push("/login")
       return
     }
@@ -89,9 +91,11 @@ function RoadmapContent() {
             }
           } catch (error) {
             console.error("Error fetching roadmap by ID:", error)
+          } finally {
+            setIsRoadmapLoading(false)
           }
-          // Fallback to dashboard
-          router.push("/dashboard")
+
+          setRoadmap(null)
         }
         fetchRoadmap()
       } else {
@@ -122,11 +126,14 @@ function RoadmapContent() {
               setShowCelebration(true)
             }
           } else {
-            router.push("/dashboard")
+            setRoadmap(null)
           }
+          setIsRoadmapLoading(false)
         }
         fetchLatest()
       }
+    } else if (!authLoading) {
+      setIsRoadmapLoading(false)
     }
   }, [user, authLoading, router, viewId])
 
@@ -286,10 +293,38 @@ function RoadmapContent() {
     }
   }
 
-  if (authLoading || !user || !roadmap) {
+  if (authLoading || (isRoadmapLoading && !!user)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!roadmap) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+        <Navbar />
+        <main className="container mx-auto px-4 py-8">
+          <Card className="mx-auto max-w-2xl">
+            <CardHeader>
+              <CardTitle>No Roadmap Found</CardTitle>
+              <CardDescription>Generate a roadmap first from the dashboard, then open this page again.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex gap-2">
+              <Button onClick={() => router.push("/dashboard")}>Go to Dashboard</Button>
+              <Button variant="outline" onClick={() => window.location.reload()}>Retry</Button>
+            </CardContent>
+          </Card>
+        </main>
       </div>
     )
   }

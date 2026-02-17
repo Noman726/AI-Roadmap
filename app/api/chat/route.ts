@@ -3,10 +3,14 @@ import { requireAdminDb, serverTimestamp } from "@/lib/firestore"
 import { generateText } from "ai"
 import { groq } from "@ai-sdk/groq"
 
+function getUserIdFromRequest(req: NextRequest) {
+  return req.headers.get("x-user-id")
+}
+
 // Helper to get user from request
 async function getUserFromRequest(req: NextRequest) {
   try {
-    const userId = req.headers.get("x-user-id")
+    const userId = getUserIdFromRequest(req)
     
     if (!userId) {
       return null
@@ -14,7 +18,15 @@ async function getUserFromRequest(req: NextRequest) {
 
     const db = requireAdminDb()
     const userDoc = await db.collection("users").doc(userId).get()
-    if (!userDoc.exists) return null
+    if (!userDoc.exists) {
+      return {
+        id: userId,
+        name: "Student",
+        email: "",
+        profile: null,
+        roadmaps: [],
+      }
+    }
 
     const roadmapsSnapshot = await userDoc.ref
       .collection("roadmaps")
@@ -47,8 +59,16 @@ async function getUserFromRequest(req: NextRequest) {
       roadmaps,
     }
   } catch (error) {
-    console.error("Error getting user from request:", error)
-    return null
+    console.warn("Falling back to lightweight chat context:", error)
+    const userId = getUserIdFromRequest(req)
+    if (!userId) return null
+    return {
+      id: userId,
+      name: "Student",
+      email: "",
+      profile: null,
+      roadmaps: [],
+    }
   }
 }
 
@@ -64,7 +84,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { message } = body
+    const { message, profile, roadmap, history } = body
 
     if (!message || typeof message !== "string") {
       return NextResponse.json(
@@ -73,30 +93,47 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const db = requireAdminDb()
+    let db: any = null
+    let chatHistory: Array<{ role: "user" | "assistant"; content: string }> = []
 
-    // Save user message to database
-    await db.collection("users").doc(user.id).collection("chatMessages").add({
-      userId: user.id,
-      role: "user",
-      content: message,
-      createdAt: serverTimestamp(),
-    })
+    try {
+      db = requireAdminDb()
+    } catch {
+      db = null
+    }
 
-    // Get previous chat history for context
-    const chatHistorySnapshot = await db
-      .collection("users")
-      .doc(user.id)
-      .collection("chatMessages")
-      .orderBy("createdAt", "asc")
-      .limit(10)
-      .get()
+    if (db) {
+      await db.collection("users").doc(user.id).collection("chatMessages").add({
+        userId: user.id,
+        role: "user",
+        content: message,
+        createdAt: serverTimestamp(),
+      })
 
-    const chatHistory = chatHistorySnapshot.docs.map((doc) => doc.data())
+      const chatHistorySnapshot = await db
+        .collection("users")
+        .doc(user.id)
+        .collection("chatMessages")
+        .orderBy("createdAt", "asc")
+        .limit(10)
+        .get()
+
+      chatHistory = chatHistorySnapshot.docs.map((doc) => {
+        const data = doc.data()
+        return {
+          role: data.role as "user" | "assistant",
+          content: String(data.content || ""),
+        }
+      })
+    } else if (Array.isArray(history)) {
+      chatHistory = history
+        .filter((msg: any) => msg && (msg.role === "user" || msg.role === "assistant") && typeof msg.content === "string")
+        .slice(-8)
+    }
 
     // Prepare context from user's roadmap and profile
-    const currentRoadmap = user.roadmaps[0]
-    const userProfile = user.profile
+    const currentRoadmap = user.roadmaps[0] || roadmap || null
+    const userProfile = user.profile || profile || null
 
     const systemPrompt = `You are a helpful and supportive AI learning assistant for students. Your role is to:
 1. Help students understand their learning roadmap and study plans
@@ -131,42 +168,49 @@ ${
 
 Be conversational, helpful, and encourage the student to keep learning. Ask clarifying questions if needed. Provide actionable advice.`
 
-    const messages = [
-      ...chatHistory.map((msg) => ({
-        role: msg.role as "user" | "assistant",
-        content: msg.content,
-      })),
-    ]
+    const messages = chatHistory
 
     // Generate response using Groq
-    const assistantResponse = await generateText({
-      model: groq("llama-3.3-70b-versatile"),
-      system: systemPrompt,
-      messages: [
-        ...messages,
-        {
-          role: "user" as const,
-          content: message,
-        },
-      ],
-      maxTokens: 500,
-    })
+    let assistantText = ""
+
+    try {
+      const assistantResponse = await generateText({
+        model: groq("llama-3.3-70b-versatile"),
+        system: systemPrompt,
+        messages: [
+          ...messages,
+          {
+            role: "user" as const,
+            content: message,
+          },
+        ],
+        maxOutputTokens: 500,
+      })
+      assistantText = assistantResponse.text
+    } catch (aiError) {
+      console.warn("AI generation failed, using fallback response:", aiError)
+      assistantText = "I’m here to help. I couldn’t reach the AI model right now, but you can tell me your current step and I’ll suggest a simple next action plan."
+    }
 
     // Save assistant response to database
-    const savedMessage = await db
-      .collection("users")
-      .doc(user.id)
-      .collection("chatMessages")
-      .add({
-        userId: user.id,
-        role: "assistant",
-        content: assistantResponse.text,
-        createdAt: serverTimestamp(),
-      })
+    let savedMessageId: string | null = null
+    if (db) {
+      const savedMessage = await db
+        .collection("users")
+        .doc(user.id)
+        .collection("chatMessages")
+        .add({
+          userId: user.id,
+          role: "assistant",
+          content: assistantText,
+          createdAt: serverTimestamp(),
+        })
+      savedMessageId = savedMessage.id
+    }
 
     return NextResponse.json({
-      message: assistantResponse.text,
-      id: savedMessage.id,
+      message: assistantText,
+      id: savedMessageId,
     })
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -187,19 +231,29 @@ Be conversational, helpful, and encourage the student to keep learning. Ask clar
 // GET chat history
 export async function GET(req: NextRequest) {
   try {
-    const user = await getUserFromRequest(req)
+    const userId = getUserIdFromRequest(req)
 
-    if (!user) {
+    if (!userId) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }
       )
     }
 
-    const db = requireAdminDb()
+    let db: any = null
+    try {
+      db = requireAdminDb()
+    } catch {
+      db = null
+    }
+
+    if (!db) {
+      return NextResponse.json({ messages: [] })
+    }
+
     const messagesSnapshot = await db
       .collection("users")
-      .doc(user.id)
+      .doc(userId)
       .collection("chatMessages")
       .orderBy("createdAt", "asc")
       .get()
