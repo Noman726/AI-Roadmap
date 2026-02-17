@@ -1,27 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma, resolveDbUserId } from "@/lib/db"
+import { requireAdminDb, serverTimestamp } from "@/lib/firestore"
 
 // Helper to get user from request
 async function getUserFromRequest(req: NextRequest) {
   try {
     const userId = req.headers.get("x-user-id")
-    const email = req.headers.get("x-user-email")
     
     if (!userId) {
       return null
     }
 
-    // Resolve the actual Prisma user ID (handles Firebase UID → Prisma CUID mapping)
-    const dbUserId = await resolveDbUserId(userId, email)
-    if (!dbUserId) {
-      return null
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: dbUserId },
-    })
-
-    return user
+    const db = requireAdminDb()
+    const userDoc = await db.collection("users").doc(userId).get()
+    return { id: userId, ...(userDoc.data() || {}) }
   } catch (error) {
     console.error("Error getting user from request:", error)
     return null
@@ -40,10 +31,18 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const notifications = await prisma.notification.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
-    })
+    const db = requireAdminDb()
+    const snapshot = await db
+      .collection("users")
+      .doc(user.id)
+      .collection("notifications")
+      .orderBy("createdAt", "desc")
+      .get()
+
+    const notifications = snapshot.docs.map((doc: any) => ({
+      id: doc.id,
+      ...doc.data(),
+    }))
 
     return NextResponse.json({ notifications })
   } catch (error) {
@@ -76,17 +75,27 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const notification = await prisma.notification.create({
-      data: {
+    const db = requireAdminDb()
+    const notificationRef = await db
+      .collection("users")
+      .doc(user.id)
+      .collection("notifications")
+      .add({
         userId: user.id,
         type,
         title,
         message,
-        metadata: metadata ? JSON.stringify(metadata) : null,
-      },
-    })
+        metadata: metadata ?? null,
+        read: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
 
-    return NextResponse.json({ notification }, { status: 201 })
+    const notificationDoc = await notificationRef.get()
+    return NextResponse.json(
+      { notification: { id: notificationDoc.id, ...notificationDoc.data() } },
+      { status: 201 }
+    )
   } catch (error) {
     console.error("Error creating notification:", error)
     return NextResponse.json(

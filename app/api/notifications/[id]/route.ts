@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma, resolveDbUserId } from "@/lib/db"
+import { requireAdminDb, serverTimestamp } from "@/lib/firestore"
 
 interface RouteParams {
   params: {
@@ -11,23 +11,14 @@ interface RouteParams {
 async function getUserFromRequest(req: NextRequest) {
   try {
     const userId = req.headers.get("x-user-id")
-    const email = req.headers.get("x-user-email")
     
     if (!userId) {
       return null
     }
 
-    // Resolve the actual Prisma user ID (handles Firebase UID → Prisma CUID mapping)
-    const dbUserId = await resolveDbUserId(userId, email)
-    if (!dbUserId) {
-      return null
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: dbUserId },
-    })
-
-    return user
+    const db = requireAdminDb()
+    const userDoc = await db.collection("users").doc(userId).get()
+    return { id: userId, ...(userDoc.data() || {}) }
   } catch (error) {
     console.error("Error getting user from request:", error)
     return null
@@ -46,26 +37,31 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // Verify the notification belongs to the user
-    const notification = await prisma.notification.findUnique({
-      where: { id: params.id },
-    })
+    const db = requireAdminDb()
+    const notificationRef = db
+      .collection("users")
+      .doc(user.id)
+      .collection("notifications")
+      .doc(params.id)
 
-    if (!notification || notification.userId !== user.id) {
-      return NextResponse.json(
-        { error: "Notification not found" },
-        { status: 404 }
-      )
+    const notification = await notificationRef.get()
+
+    if (!notification.exists) {
+      return NextResponse.json({ error: "Notification not found" }, { status: 404 })
     }
 
     const { read } = await req.json()
 
-    const updatedNotification = await prisma.notification.update({
-      where: { id: params.id },
-      data: { read: read ?? true },
-    })
+    await notificationRef.set(
+      {
+        read: read ?? true,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    )
 
-    return NextResponse.json({ notification: updatedNotification })
+    const updated = await notificationRef.get()
+    return NextResponse.json({ notification: { id: updated.id, ...updated.data() } })
   } catch (error) {
     console.error("Error updating notification:", error)
     return NextResponse.json(
@@ -87,21 +83,19 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // Verify the notification belongs to the user
-    const notification = await prisma.notification.findUnique({
-      where: { id: params.id },
-    })
+    const db = requireAdminDb()
+    const notificationRef = db
+      .collection("users")
+      .doc(user.id)
+      .collection("notifications")
+      .doc(params.id)
 
-    if (!notification || notification.userId !== user.id) {
-      return NextResponse.json(
-        { error: "Notification not found" },
-        { status: 404 }
-      )
+    const notification = await notificationRef.get()
+    if (!notification.exists) {
+      return NextResponse.json({ error: "Notification not found" }, { status: 404 })
     }
 
-    await prisma.notification.delete({
-      where: { id: params.id },
-    })
+    await notificationRef.delete()
 
     return NextResponse.json({ success: true })
   } catch (error) {

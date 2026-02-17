@@ -1,51 +1,19 @@
 "use server"
 
-import { db } from "@/lib/db"
-import { hash } from "bcryptjs"
-
-export async function signup(email: string, password: string, name: string) {
-  try {
-    // Check if user already exists
-    const existingUser = await db.user.findUnique({
-      where: { email },
-    })
-
-    if (existingUser) {
-      throw new Error("User already exists")
-    }
-
-    // Hash password
-    const hashedPassword = await hash(password, 10)
-
-    // Create user
-    const user = await db.user.create({
-      data: {
-        email,
-        name,
-        password: hashedPassword,
-      },
-    })
-
-    return { success: true, userId: user.id }
-  } catch (error) {
-    if (error && typeof error === "object" && "message" in error) {
-      return { error: String(error.message) }
-    }
-    return { error: "An error occurred during signup" }
-  }
-}
+import { requireAdminDb, serverTimestamp } from "@/lib/firestore"
 
 export async function saveProfile(userId: string, profileData: any) {
   try {
-    const profile = await db.profile.upsert({
-      where: { userId },
-      update: profileData,
-      create: {
-        userId,
-        ...profileData,
+    const db = requireAdminDb()
+    const userRef = db.collection("users").doc(userId)
+    await userRef.set(
+      {
+        profile: profileData,
+        updatedAt: serverTimestamp(),
       },
-    })
-    return { success: true, profile }
+      { merge: true }
+    )
+    return { success: true }
   } catch (error) {
     console.error("Error saving profile:", error)
     throw error
@@ -54,55 +22,56 @@ export async function saveProfile(userId: string, profileData: any) {
 
 export async function saveRoadmap(userId: string, roadmapData: any) {
   try {
-    // Find the highest order for this user's existing roadmaps
-    const lastRoadmap = await db.roadmap.findFirst({
-      where: { userId },
-      orderBy: { order: "desc" },
-    })
-    const nextOrder = (lastRoadmap?.order || 0) + 1
+    const db = requireAdminDb()
+    const roadmapsRef = db.collection("users").doc(userId).collection("roadmaps")
+    const lastSnapshot = await roadmapsRef.orderBy("order", "desc").limit(1).get()
+    const lastOrder = lastSnapshot.empty ? 0 : Number(lastSnapshot.docs[0].data().order || 0)
+    const nextOrder = lastOrder + 1
 
-    // If this is the first roadmap (order 1), delete any existing ones
-    // to avoid duplicates from regenerating the initial roadmap
-    if (nextOrder === 1 || !lastRoadmap) {
-      await db.roadmap.deleteMany({ where: { userId } })
-    }
-
-    // Create new roadmap with steps
-    const roadmap = await db.roadmap.create({
-      data: {
-        userId,
-        careerPath: roadmapData.careerPath,
-        overview: roadmapData.overview,
-        estimatedTimeframe: roadmapData.estimatedTimeframe,
-        weeklySchedule: JSON.stringify(roadmapData.weeklySchedule),
-        order: lastRoadmap ? nextOrder : 1,
-        steps: {
-          create: roadmapData.steps.map((step: any) => ({
-            title: step.title,
-            description: step.description,
-            duration: step.duration,
-            skills: JSON.stringify(step.skills),
-            resources: JSON.stringify(step.resources),
-            milestones: JSON.stringify(step.milestones),
-            completed: step.completed || false,
-          })),
-        },
-      },
-      include: {
-        steps: true,
-      },
+    const roadmapRef = roadmapsRef.doc()
+    await roadmapRef.set({
+      userId,
+      careerPath: roadmapData.careerPath,
+      overview: roadmapData.overview,
+      estimatedTimeframe: roadmapData.estimatedTimeframe,
+      weeklySchedule: roadmapData.weeklySchedule,
+      order: nextOrder,
+      completedAt: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     })
 
-    // Create progress tracking
-    await db.progress.create({
-      data: {
-        userId,
-        roadmapId: roadmap.id,
-        totalSteps: roadmap.steps.length,
-      },
+    const stepsRef = roadmapRef.collection("steps")
+    await Promise.all(
+      (roadmapData.steps || []).map((step: any, index: number) => {
+        const stepId = step.id || `step-${index + 1}`
+        return stepsRef.doc(stepId).set({
+          id: stepId,
+          userId,
+          roadmapId: roadmapRef.id,
+          title: step.title,
+          description: step.description,
+          duration: step.duration,
+          skills: Array.isArray(step.skills) ? step.skills : [],
+          resources: Array.isArray(step.resources) ? step.resources : [],
+          milestones: Array.isArray(step.milestones) ? step.milestones : [],
+          completed: Boolean(step.completed),
+          progress: step.progress ?? 0,
+          order: index + 1,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      })
+    )
+
+    await db.collection("users").doc(userId).collection("progress").doc(roadmapRef.id).set({
+      roadmapId: roadmapRef.id,
+      completedSteps: 0,
+      totalSteps: Array.isArray(roadmapData.steps) ? roadmapData.steps.length : 0,
+      updatedAt: serverTimestamp(),
     })
 
-    return { success: true, roadmap }
+    return { success: true, roadmapId: roadmapRef.id }
   } catch (error) {
     console.error("Error saving roadmap:", error)
     throw error
@@ -111,26 +80,24 @@ export async function saveRoadmap(userId: string, roadmapData: any) {
 
 export async function getUserRoadmap(userId: string) {
   try {
-    // Get the latest (most recent / highest order) active roadmap
-    const roadmap = await db.roadmap.findFirst({
-      where: { userId, completedAt: null },
-      orderBy: { order: "desc" },
-      include: {
-        steps: true,
-      },
-    })
+    const db = requireAdminDb()
+    const roadmapsRef = db.collection("users").doc(userId).collection("roadmaps")
+    const latestSnapshot = await roadmapsRef.orderBy("order", "desc").limit(5).get()
+    if (latestSnapshot.empty) return null
 
-    if (!roadmap) return null
+    const roadmapDoc =
+      latestSnapshot.docs.find((doc) => doc.data().completedAt == null) || latestSnapshot.docs[0]
+    const roadmapData = roadmapDoc.data()
+    const stepsSnapshot = await roadmapDoc.ref.collection("steps").orderBy("order", "asc").get()
+    const steps = stepsSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }))
 
     return {
-      ...roadmap,
-      weeklySchedule: JSON.parse(roadmap.weeklySchedule),
-      steps: roadmap.steps.map((step) => ({
-        ...step,
-        skills: JSON.parse(step.skills),
-        resources: JSON.parse(step.resources),
-        milestones: JSON.parse(step.milestones),
-      })),
+      id: roadmapDoc.id,
+      ...roadmapData,
+      steps,
     }
   } catch (error) {
     console.error("Error fetching roadmap:", error)
@@ -138,13 +105,23 @@ export async function getUserRoadmap(userId: string) {
   }
 }
 
-export async function updateStepCompletion(stepId: string, completed: boolean) {
+export async function updateStepCompletion(userId: string, stepId: string, completed: boolean) {
   try {
-    const step = await db.step.update({
-      where: { id: stepId },
-      data: { completed },
+    const db = requireAdminDb()
+    const stepsSnapshot = await db.collectionGroup("steps").where("userId", "==", userId).get()
+    const stepDoc = stepsSnapshot.docs.find((doc) => doc.data().id === stepId) || null
+
+    if (!stepDoc) {
+      throw new Error("Step not found")
+    }
+
+    await stepDoc.ref.update({
+      completed,
+      progress: completed ? 100 : 0,
+      updatedAt: serverTimestamp(),
     })
-    return { success: true, step }
+
+    return { success: true, step: { id: stepDoc.id, ...stepDoc.data(), completed } }
   } catch (error) {
     console.error("Error updating step:", error)
     throw error
@@ -153,23 +130,18 @@ export async function updateStepCompletion(stepId: string, completed: boolean) {
 
 export async function saveProgress(userId: string, roadmapId: string, completedSteps: number, feedback?: string) {
   try {
-    const progress = await db.progress.upsert({
-      where: {
-        userId_roadmapId: { userId, roadmapId },
-      },
-      update: {
-        completedSteps,
-        feedback: feedback || undefined,
-      },
-      create: {
-        userId,
+    const db = requireAdminDb()
+    const progressRef = db.collection("users").doc(userId).collection("progress").doc(roadmapId)
+    await progressRef.set(
+      {
         roadmapId,
-        totalSteps: 0,
         completedSteps,
-        feedback,
+        feedback: feedback ?? null,
+        updatedAt: serverTimestamp(),
       },
-    })
-    return { success: true, progress }
+      { merge: true }
+    )
+    return { success: true }
   } catch (error) {
     console.error("Error saving progress:", error)
     throw error
@@ -178,21 +150,17 @@ export async function saveProgress(userId: string, roadmapId: string, completedS
 
 export async function saveStudyPlan(userId: string, roadmapId: string, studyPlan: any) {
   try {
-    const progress = await db.progress.upsert({
-      where: {
-        userId_roadmapId: { userId, roadmapId },
-      },
-      update: {
-        studyPlan: JSON.stringify(studyPlan),
-      },
-      create: {
-        userId,
+    const db = requireAdminDb()
+    const progressRef = db.collection("users").doc(userId).collection("progress").doc(roadmapId)
+    await progressRef.set(
+      {
         roadmapId,
-        totalSteps: 0,
-        studyPlan: JSON.stringify(studyPlan),
+        studyPlan,
+        updatedAt: serverTimestamp(),
       },
-    })
-    return { success: true, progress }
+      { merge: true }
+    )
+    return { success: true }
   } catch (error) {
     console.error("Error saving study plan:", error)
     throw error

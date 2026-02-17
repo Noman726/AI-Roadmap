@@ -1,6 +1,6 @@
 import { groq } from "@ai-sdk/groq"
 import { generateText } from "ai"
-import { prisma, resolveDbUserId } from "@/lib/db"
+import { requireAdminDb, serverTimestamp } from "@/lib/firestore"
 
 export async function POST(req: Request) {
   const { profile, completedRoadmap, userId, email } = await req.json()
@@ -33,96 +33,97 @@ export async function POST(req: Request) {
   // Save to database if userId is provided
   if (userId) {
     try {
-      const dbUserId = await resolveDbUserId(userId, email)
-      if (dbUserId) {
-        // Mark the completed roadmap as done in DB
-        if (completedRoadmap.id) {
-          await prisma.roadmap.update({
-            where: { id: completedRoadmap.id },
-            data: { completedAt: new Date() },
-          })
-        } else {
-          // Find the latest active roadmap and mark it completed
-          const activeRoadmap = await prisma.roadmap.findFirst({
-            where: { userId: dbUserId, completedAt: null },
-            orderBy: { order: "desc" },
-          })
-          if (activeRoadmap) {
-            await prisma.roadmap.update({
-              where: { id: activeRoadmap.id },
-              data: { completedAt: new Date() },
-            })
-          }
+      const db = requireAdminDb()
+      const userRef = db.collection("users").doc(userId)
+      const roadmapsRef = userRef.collection("roadmaps")
+
+      if (completedRoadmap.id) {
+        await roadmapsRef.doc(completedRoadmap.id).set(
+          { completedAt: serverTimestamp(), updatedAt: serverTimestamp() },
+          { merge: true }
+        )
+      } else {
+        const latestSnapshot = await roadmapsRef.orderBy("order", "desc").limit(5).get()
+        const activeDoc = latestSnapshot.docs.find((doc) => doc.data().completedAt == null)
+
+        if (activeDoc) {
+          await activeDoc.ref.set(
+            { completedAt: serverTimestamp(), updatedAt: serverTimestamp() },
+            { merge: true }
+          )
         }
+      }
 
-        // Get next order number
-        const lastRoadmap = await prisma.roadmap.findFirst({
-          where: { userId: dbUserId },
-          orderBy: { order: "desc" },
-        })
-        const nextOrder = (lastRoadmap?.order || 0) + 1
+      const lastSnapshot = await roadmapsRef.orderBy("order", "desc").limit(1).get()
+      const lastOrder = lastSnapshot.empty ? 0 : Number(lastSnapshot.docs[0].data().order || 0)
+      const nextOrder = lastOrder + 1
 
-        // Save the new roadmap
-        const newRoadmap = await prisma.roadmap.create({
-          data: {
-            userId: dbUserId,
-            careerPath: roadmapData.careerPath,
-            overview: roadmapData.overview,
-            estimatedTimeframe: roadmapData.estimatedTimeframe,
-            weeklySchedule: JSON.stringify(roadmapData.weeklySchedule),
-            order: nextOrder,
-            steps: {
-              create: roadmapData.steps.map((step: any) => ({
-                title: step.title,
-                description: step.description,
-                duration: step.duration,
-                skills: JSON.stringify(step.skills || []),
-                resources: JSON.stringify(step.resources || []),
-                milestones: JSON.stringify(step.milestones || []),
-                completed: false,
-              })),
-            },
-          },
-          include: { steps: true },
-        })
+      const newRoadmapRef = roadmapsRef.doc()
+      await newRoadmapRef.set({
+        userId,
+        careerPath: roadmapData.careerPath,
+        overview: roadmapData.overview,
+        estimatedTimeframe: roadmapData.estimatedTimeframe,
+        weeklySchedule: roadmapData.weeklySchedule,
+        order: nextOrder,
+        completedAt: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
 
-        // Create progress tracking for the new roadmap
-        await prisma.progress.create({
-          data: {
-            userId: dbUserId,
-            roadmapId: newRoadmap.id,
-            totalSteps: newRoadmap.steps.length,
-          },
-        })
-
-        // Create a notification
-        await prisma.notification.create({
-          data: {
-            userId: dbUserId,
-            type: "milestone",
-            title: "🎉 New Roadmap Unlocked!",
-            message: `Congratulations on completing "${completedRoadmap.careerPath}"! Your next roadmap "${roadmapData.careerPath}" is ready.`,
-          },
-        })
-
-        // Return the formatted roadmap with parsed JSON fields
-        const formattedRoadmap = {
-          ...roadmapData,
-          id: newRoadmap.id,
-          order: nextOrder,
-          completedAt: null,
-          steps: newRoadmap.steps.map((step: any) => ({
-            ...step,
+      const stepsRef = newRoadmapRef.collection("steps")
+      await Promise.all(
+        roadmapData.steps.map((step: any, index: number) => {
+          const stepId = step.id || `step-${index + 1}`
+          return stepsRef.doc(stepId).set({
+            id: stepId,
+            userId,
+            roadmapId: newRoadmapRef.id,
+            title: step.title,
+            description: step.description,
+            duration: step.duration,
+            skills: step.skills || [],
+            resources: step.resources || [],
+            milestones: step.milestones || [],
             completed: false,
             progress: 0,
-            skills: JSON.parse(step.skills),
-            resources: JSON.parse(step.resources),
-            milestones: JSON.parse(step.milestones),
-          })),
-        }
+            order: index + 1,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        })
+      )
 
-        return Response.json({ roadmap: formattedRoadmap, saved: true })
+      await userRef.collection("progress").doc(newRoadmapRef.id).set({
+        roadmapId: newRoadmapRef.id,
+        totalSteps: roadmapData.steps.length,
+        completedSteps: 0,
+        updatedAt: serverTimestamp(),
+      })
+
+      await userRef.collection("notifications").add({
+        userId,
+        type: "milestone",
+        title: "🎉 New Roadmap Unlocked!",
+        message: `Congratulations on completing "${completedRoadmap.careerPath}"! Your next roadmap "${roadmapData.careerPath}" is ready.`,
+        read: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+
+      const formattedRoadmap = {
+        ...roadmapData,
+        id: newRoadmapRef.id,
+        order: nextOrder,
+        completedAt: null,
+        steps: roadmapData.steps.map((step: any) => ({
+          ...step,
+          completed: false,
+          progress: 0,
+        })),
       }
+
+      return Response.json({ roadmap: formattedRoadmap, saved: true })
     } catch (dbError) {
       console.error("Failed to save next roadmap to DB:", dbError)
     }
@@ -265,9 +266,9 @@ function getWebNextRoadmap(completedOrder: number, profile: any) {
           id: "step-2",
           title: "Databases & ORM",
           description:
-            "Master relational and NoSQL databases. Learn SQL, PostgreSQL, MongoDB, and ORMs like Prisma.",
+            "Master relational and NoSQL databases. Learn SQL, PostgreSQL, MongoDB, and ORMs like Sequelize.",
           duration: "4 Weeks",
-          skills: ["SQL", "PostgreSQL", "MongoDB", "Prisma ORM"],
+          skills: ["SQL", "PostgreSQL", "MongoDB", "Sequelize ORM"],
           resources: [
             {
               title: "SQLBolt",
@@ -275,14 +276,14 @@ function getWebNextRoadmap(completedOrder: number, profile: any) {
               description: "Interactive SQL lessons.",
             },
             {
-              title: "Prisma Documentation",
+              title: "Sequelize Documentation",
               type: "documentation",
-              description: "Modern database toolkit.",
+              description: "ORM for Node.js apps.",
             },
           ],
           milestones: [
             "Design a normalized database schema",
-            "Build a full-stack app with Prisma",
+            "Build a full-stack app with an ORM",
           ],
         },
         {

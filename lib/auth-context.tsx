@@ -8,7 +8,8 @@ import {
   signOut,
   onAuthStateChanged,
 } from "firebase/auth"
-import { auth } from "./firebase"
+import { doc, setDoc, serverTimestamp } from "firebase/firestore"
+import { auth, db } from "./firebase"
 
 interface User {
   id: string
@@ -57,6 +58,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: result.user.email,
         name: result.user.displayName || email.split("@")[0],
       })
+
+      // Best-effort: sync user profile to Firestore (don't block login if rules deny it)
+      try {
+        await setDoc(
+          doc(db, "users", result.user.uid),
+          {
+            email: result.user.email,
+            name: result.user.displayName || email.split("@")[0],
+            updatedAt: serverTimestamp(),
+            createdAt: serverTimestamp(),
+          },
+          { merge: true }
+        )
+      } catch (firestoreErr) {
+        console.warn("Could not sync user doc to Firestore:", firestoreErr)
+      }
     } finally {
       setIsLoading(false)
     }
@@ -74,16 +91,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         name: name,
       })
 
-      // Save user profile to Firestore (via API)
-      await fetch("/api/auth/create-user", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          uid: result.user.uid,
+      try {
+        // Save user profile to Firestore (via API)
+        await fetch("/api/auth/create-user", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uid: result.user.uid,
+            email,
+            name,
+          }),
+        })
+      } catch (error) {
+        console.warn("Failed to create user via API, using client Firestore:", error)
+      }
+
+      await setDoc(
+        doc(db, "users", result.user.uid),
+        {
           email,
           name,
-        }),
-      })
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      )
     } finally {
       setIsLoading(false)
     }

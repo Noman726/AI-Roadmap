@@ -9,7 +9,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Checkbox } from "@/components/ui/checkbox"
-import { BookOpen, CheckCircle2, Clock, ExternalLink, Loader2, Sparkles, Trophy, Rocket, PartyPopper, ArrowLeft } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { BookOpen, CheckCircle2, Clock, ExternalLink, Loader2, Sparkles, Trophy, Rocket, PartyPopper, ArrowLeft, RefreshCw } from "lucide-react"
 import { updateStepCompletion } from "@/lib/actions"
 import type { Roadmap } from "@/lib/types"
 
@@ -32,6 +36,10 @@ function RoadmapContent() {
   const [isGeneratingNext, setIsGeneratingNext] = useState(false)
   const [showCelebration, setShowCelebration] = useState(false)
   const [isViewingCompleted, setIsViewingCompleted] = useState(false)
+  const [showChangeCareer, setShowChangeCareer] = useState(false)
+  const [isChangingCareer, setIsChangingCareer] = useState(false)
+  const [newCareerGoal, setNewCareerGoal] = useState("")
+  const [newSkillLevel, setNewSkillLevel] = useState("")
 
   const generateStudyPlan = async (step: any) => {
     if (!user || !roadmap) return
@@ -143,7 +151,7 @@ function RoadmapContent() {
     try {
       const step = updatedSteps.find(s => s.id === stepId)
       if (step) {
-        await updateStepCompletion(stepId, step.completed)
+        await updateStepCompletion(user.id, stepId, step.completed)
       }
     } catch (error) {
       console.warn("Failed to save step completion to database:", error)
@@ -192,6 +200,92 @@ function RoadmapContent() {
     }
   }
 
+  const changeCareerPath = async () => {
+    if (!user || !newCareerGoal.trim()) return
+    setIsChangingCareer(true)
+    try {
+      // Load existing profile and update career goal
+      const existingProfile = JSON.parse(localStorage.getItem(`profile_${user.id}`) || "{}")
+      const updatedProfile = {
+        ...existingProfile,
+        careerGoal: newCareerGoal.trim(),
+        ...(newSkillLevel ? { currentSkillLevel: newSkillLevel } : {}),
+      }
+
+      // Save updated profile to localStorage
+      localStorage.setItem(`profile_${user.id}`, JSON.stringify(updatedProfile))
+
+      // Clear all cached study plans and completed tasks from old career path
+      const keysToRemove: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && (key.startsWith(`studyPlan_${user.id}`) || key.startsWith(`completedTasks_${user.id}`))) {
+          keysToRemove.push(key)
+        }
+      }
+      keysToRemove.forEach(key => localStorage.removeItem(key))
+
+      // Try to update profile in database
+      try {
+        await fetch("/api/profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: user.id,
+            email: user.email,
+            name: user.name,
+            profileData: updatedProfile,
+          }),
+        })
+      } catch (err) {
+        console.warn("Failed to save updated profile to DB:", err)
+      }
+
+      // Generate a new roadmap with the updated career goal
+      const response = await fetch("/api/generate-roadmap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: updatedProfile }),
+      })
+      const data = await response.json()
+
+      if (data.roadmap) {
+        const newRoadmap = {
+          ...data.roadmap,
+          completedAt: null,
+          steps: data.roadmap.steps.map((step: any) => ({
+            ...step,
+            completed: false,
+            progress: 0,
+            skills: Array.isArray(step.skills) ? step.skills : [],
+            resources: Array.isArray(step.resources) ? step.resources : [],
+            milestones: Array.isArray(step.milestones) ? step.milestones : [],
+          })),
+        }
+
+        setRoadmap(newRoadmap)
+        setShowCelebration(false)
+        localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(newRoadmap))
+
+        // Save new roadmap to database
+        try {
+          const { saveRoadmap } = await import("@/lib/actions")
+          await saveRoadmap(user.id, newRoadmap)
+        } catch (dbError) {
+          console.warn("Failed to save new roadmap to database:", dbError)
+        }
+      }
+
+      setShowChangeCareer(false)
+      setNewCareerGoal("")
+      setNewSkillLevel("")
+    } catch (error) {
+      console.error("Error changing career path:", error)
+    } finally {
+      setIsChangingCareer(false)
+    }
+  }
+
   if (authLoading || !user || !roadmap) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -227,8 +321,75 @@ function RoadmapContent() {
         )}
 
         <div className="mb-8">
-          <h1 className="text-balance mb-2 text-3xl font-bold">{roadmap.careerPath} Roadmap</h1>
-          <p className="text-balance text-muted-foreground">{roadmap.overview}</p>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <h1 className="text-balance mb-2 text-3xl font-bold">{roadmap.careerPath} Roadmap</h1>
+              <p className="text-balance text-muted-foreground">{roadmap.overview}</p>
+            </div>
+            {!isViewingCompleted && (
+              <Dialog open={showChangeCareer} onOpenChange={setShowChangeCareer}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="shrink-0">
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Change Career Path
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Change Career Path</DialogTitle>
+                    <DialogDescription>
+                      Enter a new career goal to generate a fresh roadmap. Your current roadmap progress will be saved in history.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="new-career">New Career Goal</Label>
+                      <Input
+                        id="new-career"
+                        placeholder="e.g., Data Scientist, DevOps Engineer, UX Designer..."
+                        value={newCareerGoal}
+                        onChange={(e) => setNewCareerGoal(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="new-skill-level">Skill Level (optional)</Label>
+                      <Select value={newSkillLevel} onValueChange={setNewSkillLevel}>
+                        <SelectTrigger id="new-skill-level">
+                          <SelectValue placeholder="Keep current level" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="beginner">Beginner</SelectItem>
+                          <SelectItem value="intermediate">Intermediate</SelectItem>
+                          <SelectItem value="advanced">Advanced</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                      <strong>Note:</strong> This will generate a completely new roadmap for your new career goal. Your current progress on the existing roadmap will be preserved.
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setShowChangeCareer(false)} disabled={isChangingCareer}>
+                      Cancel
+                    </Button>
+                    <Button onClick={changeCareerPath} disabled={!newCareerGoal.trim() || isChangingCareer}>
+                      {isChangingCareer ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="mr-2 h-4 w-4" />
+                          Generate New Roadmap
+                        </>
+                      )}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            )}
+          </div>
           <div className="mt-4 flex items-center gap-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="h-4 w-4" />

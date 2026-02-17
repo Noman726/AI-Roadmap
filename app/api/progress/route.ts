@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma, resolveDbUserId } from "@/lib/db"
+import { requireAdminDb } from "@/lib/firestore"
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get("userId")
-    const email = searchParams.get("email")
     const roadmapId = searchParams.get("roadmapId")
 
     if (!userId || !roadmapId) {
@@ -15,29 +14,22 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Resolve the actual Prisma user ID (Firebase UID → Prisma CUID)
-    const dbUserId = await resolveDbUserId(userId, email)
-    if (!dbUserId) {
-      return NextResponse.json(
-        { error: "User not found in database" },
-        { status: 404 }
-      )
-    }
+    const db = requireAdminDb()
+    const progressDoc = await db
+      .collection("users")
+      .doc(userId)
+      .collection("progress")
+      .doc(roadmapId)
+      .get()
 
-    // Get progress record from database
-    const progress = await prisma.progress.findFirst({
-      where: {
-        userId: dbUserId,
-        roadmapId,
-      },
-    })
-
-    if (!progress) {
+    if (!progressDoc.exists) {
       return NextResponse.json(
         { error: "Progress record not found" },
         { status: 404 }
       )
     }
+
+    const progress = progressDoc.data() || {}
 
     // Calculate percentage
     const percentage = progress.totalSteps > 0 
@@ -47,6 +39,7 @@ export async function GET(request: NextRequest) {
     const response = NextResponse.json(
       { 
         progress: {
+          id: progressDoc.id,
           ...progress,
           percentage,
         },

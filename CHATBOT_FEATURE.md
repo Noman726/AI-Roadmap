@@ -6,8 +6,8 @@ The AI Roadmap application now includes a comprehensive chatbot feature that pro
 ## Features Implemented
 
 ### 1. **Database Integration**
-- Added `ChatMessage` model to Prisma schema
-- Stores all chat conversations with timestamps
+- Stores chat conversations in Firestore
+- Saves timestamps for each message
 - Links messages to user accounts for persistent history
 
 ### 2. **API Routes**
@@ -182,9 +182,9 @@ Potential improvements:
 - Check browser console for errors
 
 **Messages not saving?**
-- Ensure database migration ran (`npx prisma migrate dev`)
-- Check DATABASE_URL environment variable
-- Verify Prisma client is initialized
+- Ensure Firebase Admin credentials are set
+- Check FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY
+- Verify Firestore rules allow access
 
 **No AI responses?**
 - Check OPENAI_API_KEY is set

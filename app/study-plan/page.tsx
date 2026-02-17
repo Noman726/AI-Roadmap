@@ -201,17 +201,31 @@ function StudyPlanContent() {
 
     if (storedStudyPlan) {
       const parsed = JSON.parse(storedStudyPlan)
-      // Only load this plan if it matches the target step's focus area
-      if (activeStep && parsed.focusArea &&
-          (parsed.focusArea.toLowerCase().includes(activeStep.title.toLowerCase()) ||
-           activeStep.title.toLowerCase().includes(parsed.focusArea.toLowerCase()) ||
-           !targetStepId)) {
-        setStudyPlan(parsed)
-      } else if (stepPlan) {
-        // Step-specific plan always loads
-        setStudyPlan(parsed)
+
+      // Verify this plan belongs to the current roadmap's career path
+      const currentCareerPath = roadmap.careerPath?.toLowerCase() || ""
+      const planFocus = parsed.focusArea?.toLowerCase() || ""
+
+      // Check if this plan's focus area matches any step in the current roadmap
+      const matchesCurrentRoadmap = roadmap.steps.some((s: any) =>
+        planFocus.includes(s.title.toLowerCase()) ||
+        s.title.toLowerCase().includes(planFocus)
+      )
+
+      if (matchesCurrentRoadmap) {
+        // Plan belongs to current roadmap
+        if (activeStep && parsed.focusArea &&
+            (parsed.focusArea.toLowerCase().includes(activeStep.title.toLowerCase()) ||
+             activeStep.title.toLowerCase().includes(parsed.focusArea.toLowerCase()) ||
+             !targetStepId)) {
+          setStudyPlan(parsed)
+        } else if (stepPlan) {
+          setStudyPlan(parsed)
+        } else {
+          setStudyPlan(null)
+        }
       } else {
-        // General plan doesn't match this step, clear it so user can generate a new one
+        // Stale plan from a different career path — discard it
         setStudyPlan(null)
       }
     } else {

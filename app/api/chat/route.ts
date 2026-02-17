@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma, resolveDbUserId } from "@/lib/db"
+import { requireAdminDb, serverTimestamp } from "@/lib/firestore"
 import { generateText } from "ai"
 import { groq } from "@ai-sdk/groq"
 
@@ -7,34 +7,45 @@ import { groq } from "@ai-sdk/groq"
 async function getUserFromRequest(req: NextRequest) {
   try {
     const userId = req.headers.get("x-user-id")
-    const email = req.headers.get("x-user-email")
     
     if (!userId) {
       return null
     }
 
-    // Resolve the actual Prisma user ID (handles Firebase UID → Prisma CUID mapping)
-    const dbUserId = await resolveDbUserId(userId, email)
-    if (!dbUserId) {
-      return null
+    const db = requireAdminDb()
+    const userDoc = await db.collection("users").doc(userId).get()
+    if (!userDoc.exists) return null
+
+    const roadmapsSnapshot = await userDoc.ref
+      .collection("roadmaps")
+      .orderBy("createdAt", "desc")
+      .limit(1)
+      .get()
+
+    let roadmaps: any[] = []
+    if (!roadmapsSnapshot.empty) {
+      const roadmapDoc = roadmapsSnapshot.docs[0]
+      const stepsSnapshot = await roadmapDoc.ref.collection("steps").orderBy("order", "asc").get()
+      const steps = stepsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+      const progressDoc = await userDoc.ref.collection("progress").doc(roadmapDoc.id).get()
+      const progress = progressDoc.exists ? [{ id: progressDoc.id, ...progressDoc.data() }] : []
+
+      roadmaps = [
+        {
+          id: roadmapDoc.id,
+          ...roadmapDoc.data(),
+          steps,
+          progress,
+        },
+      ]
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: dbUserId },
-      include: {
-        profile: true,
-        roadmaps: {
-          include: {
-            steps: true,
-            progress: true,
-          },
-          take: 1,
-          orderBy: { createdAt: "desc" },
-        },
-      },
-    })
-
-    return user
+    return {
+      id: userId,
+      ...userDoc.data(),
+      profile: (userDoc.data() || {}).profile || null,
+      roadmaps,
+    }
   } catch (error) {
     console.error("Error getting user from request:", error)
     return null
@@ -62,21 +73,26 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const db = requireAdminDb()
+
     // Save user message to database
-    await prisma.chatMessage.create({
-      data: {
-        userId: user.id,
-        role: "user",
-        content: message,
-      },
+    await db.collection("users").doc(user.id).collection("chatMessages").add({
+      userId: user.id,
+      role: "user",
+      content: message,
+      createdAt: serverTimestamp(),
     })
 
     // Get previous chat history for context
-    const chatHistory = await prisma.chatMessage.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "asc" },
-      take: 10, // Last 10 messages for context
-    })
+    const chatHistorySnapshot = await db
+      .collection("users")
+      .doc(user.id)
+      .collection("chatMessages")
+      .orderBy("createdAt", "asc")
+      .limit(10)
+      .get()
+
+    const chatHistory = chatHistorySnapshot.docs.map((doc) => doc.data())
 
     // Prepare context from user's roadmap and profile
     const currentRoadmap = user.roadmaps[0]
@@ -107,7 +123,7 @@ ${
 
 Current Focus Step:
 ${
-  currentRoadmap.steps.find((s) => !JSON.parse(s.milestones || "[]")[0])?.title || "Starting the journey"
+  currentRoadmap.steps.find((s) => Array.isArray(s.milestones) && s.milestones.length > 0)?.title || "Starting the journey"
 }
 `
     : ""
@@ -137,13 +153,16 @@ Be conversational, helpful, and encourage the student to keep learning. Ask clar
     })
 
     // Save assistant response to database
-    const savedMessage = await prisma.chatMessage.create({
-      data: {
+    const savedMessage = await db
+      .collection("users")
+      .doc(user.id)
+      .collection("chatMessages")
+      .add({
         userId: user.id,
         role: "assistant",
         content: assistantResponse.text,
-      },
-    })
+        createdAt: serverTimestamp(),
+      })
 
     return NextResponse.json({
       message: assistantResponse.text,
@@ -177,10 +196,15 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const messages = await prisma.chatMessage.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "asc" },
-    })
+    const db = requireAdminDb()
+    const messagesSnapshot = await db
+      .collection("users")
+      .doc(user.id)
+      .collection("chatMessages")
+      .orderBy("createdAt", "asc")
+      .get()
+
+    const messages = messagesSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
 
     return NextResponse.json({ messages })
   } catch (error) {

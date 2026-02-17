@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma, resolveDbUserId } from "@/lib/db"
+import { requireAdminDb, serverTimestamp } from "@/lib/firestore"
 
 interface StepCompletionRequest {
   userId: string
@@ -11,7 +11,7 @@ interface StepCompletionRequest {
 export async function PUT(request: NextRequest) {
   try {
     const body: StepCompletionRequest = await request.json()
-    const { userId, email, stepId, stepTitle } = body
+    const { userId, stepId, stepTitle } = body
 
     if (!userId || (!stepId && !stepTitle)) {
       return NextResponse.json(
@@ -20,41 +20,47 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    // Resolve the actual Prisma user ID (Firebase UID → Prisma CUID)
-    const dbUserId = await resolveDbUserId(userId, email)
-    if (!dbUserId) {
-      return NextResponse.json(
-        { error: "User not found in database" },
-        { status: 404 }
-      )
-    }
+    const db = requireAdminDb()
+    const userRef = db.collection("users").doc(userId)
 
-    console.log(`[complete-step] Resolved userId ${userId} → dbUserId ${dbUserId}, stepId=${stepId}, stepTitle=${stepTitle}`)
+    console.log(`[complete-step] userId=${userId}, stepId=${stepId}, stepTitle=${stepTitle}`)
 
-    // First try to find by ID
-    let existingStep = await prisma.step.findUnique({
-      where: { id: stepId },
-    })
+    let stepDocRef: any = null
+    let roadmapId: string | null = null
 
-    // If not found by ID, find by exact title match in the user's roadmap
-    if (!existingStep && stepTitle) {
-      const roadmap = await prisma.roadmap.findFirst({
-        where: { userId: dbUserId },
-        include: { steps: true },
-      })
+    if (stepId) {
+      const stepSnapshot = await db.collectionGroup("steps").where("userId", "==", userId).get()
+      const match = stepSnapshot.docs.find((doc) => doc.data().id === stepId) || null
 
-      if (roadmap) {
-        existingStep = roadmap.steps.find(
-          (s) => s.title.toLowerCase() === stepTitle.toLowerCase()
-        ) || roadmap.steps.find(
-          (s) => s.title.toLowerCase().includes(stepTitle.toLowerCase())
-        ) || roadmap.steps.find(
-          (s) => stepTitle.toLowerCase().includes(s.title.toLowerCase())
-        ) || null
+      if (match) {
+        stepDocRef = match.ref
+        roadmapId = String(match.data().roadmapId || "")
       }
     }
 
-    if (!existingStep) {
+    if (!stepDocRef && stepTitle) {
+      const roadmapSnapshot = await userRef.collection("roadmaps").orderBy("order", "desc").limit(1).get()
+      if (!roadmapSnapshot.empty) {
+        const roadmapDoc = roadmapSnapshot.docs[0]
+        roadmapId = roadmapDoc.id
+        const stepsSnapshot = await roadmapDoc.ref.collection("steps").orderBy("order", "asc").get()
+        const steps = stepsSnapshot.docs
+
+        const match = steps.find(
+          (doc) => String(doc.data().title || "").toLowerCase() === stepTitle.toLowerCase()
+        ) || steps.find(
+          (doc) => String(doc.data().title || "").toLowerCase().includes(stepTitle.toLowerCase())
+        ) || steps.find(
+          (doc) => stepTitle.toLowerCase().includes(String(doc.data().title || "").toLowerCase())
+        ) || null
+
+        if (match) {
+          stepDocRef = match.ref
+        }
+      }
+    }
+
+    if (!stepDocRef || !roadmapId) {
       console.warn(`[complete-step] No uncompleted step found for user ${userId}`)
       return NextResponse.json(
         { error: "No uncompleted step found" },
@@ -62,83 +68,62 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    console.log(`[complete-step] Found step: ${existingStep.id} - ${existingStep.title}`)
+    const stepSnapshot = await stepDocRef.get()
+    const stepData = stepSnapshot.data() || {}
 
-    // Update step to completed
-    const step = await prisma.step.update({
-      where: { id: existingStep.id },
-      data: {
-        completed: true,
-        progress: 100,
+    console.log(`[complete-step] Found step: ${stepSnapshot.id} - ${stepData.title || ""}`)
+
+    await stepDocRef.update({
+      completed: true,
+      progress: 100,
+      updatedAt: serverTimestamp(),
+    })
+
+    console.log(`[complete-step] Step marked complete: ${stepSnapshot.id} - ${stepData.title || ""}`)
+
+    const roadmapRef = userRef.collection("roadmaps").doc(roadmapId)
+    const stepsSnapshot = await roadmapRef.collection("steps").orderBy("order", "asc").get()
+    const steps = stepsSnapshot.docs.map((doc) => doc.data())
+    const completedStepsCount = steps.filter((s) => s.completed).length
+
+    const progressRef = userRef.collection("progress").doc(roadmapId)
+    await progressRef.set(
+      {
+        roadmapId,
+        completedSteps: completedStepsCount,
+        totalSteps: steps.length,
+        updatedAt: serverTimestamp(),
       },
-    })
+      { merge: true }
+    )
 
-    console.log(`[complete-step] Step marked complete: ${step.id} - ${step.title}`)
+    console.log(`[complete-step] Progress updated: ${completedStepsCount}/${steps.length}`)
 
-    // Get the roadmap to update progress
-    const roadmap = await prisma.roadmap.findUnique({
-      where: { id: step.roadmapId },
-      include: { steps: true },
-    })
-
-    if (roadmap) {
-      const completedStepsCount = roadmap.steps.filter((s) => s.completed || s.id === stepId).length
-
-      // Update overall progress
-      const existing = await prisma.progress.findFirst({
-        where: {
-          userId: dbUserId,
-          roadmapId: roadmap.id,
+    try {
+      await userRef.collection("notifications").add({
+        userId,
+        type: "step_completion",
+        title: "Step Completed! 🌟",
+        message: `Congratulations! You've completed "${stepData.title}". You're making great progress!`,
+        metadata: {
+          stepId,
+          stepTitle: stepData.title,
+          progressPercentage: steps.length ? Math.round((completedStepsCount / steps.length) * 100) : 0,
+          timestamp: new Date().toISOString(),
         },
+        read: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       })
-
-      if (existing) {
-        await prisma.progress.update({
-          where: { id: existing.id },
-          data: { 
-            completedSteps: completedStepsCount,
-            updatedAt: new Date(),
-          },
-        })
-      } else {
-        await prisma.progress.create({
-          data: {
-            userId: dbUserId,
-            roadmapId: roadmap.id,
-            totalSteps: roadmap.steps.length,
-            completedSteps: completedStepsCount,
-          },
-        })
-      }
-
-      console.log(`[complete-step] Progress updated: ${completedStepsCount}/${roadmap.steps.length}`)
-
-      // Create a milestone notification
-      try {
-        await prisma.notification.create({
-          data: {
-            userId: dbUserId,
-            type: "step_completion",
-            title: "Step Completed! 🌟",
-            message: `Congratulations! You've completed "${step.title}". You're making great progress!`,
-            metadata: JSON.stringify({
-              stepId,
-              stepTitle: step.title,
-              progressPercentage: Math.round((completedStepsCount / roadmap.steps.length) * 100),
-              timestamp: new Date().toISOString(),
-            }),
-          },
-        })
-      } catch (notifError) {
-        console.warn("Failed to create step completion notification:", notifError)
-      }
+    } catch (notifError) {
+      console.warn("Failed to create step completion notification:", notifError)
     }
 
     return NextResponse.json(
       { 
         success: true,
         message: "Step marked as completed",
-        step,
+        step: { id: stepSnapshot.id, ...stepData, completed: true, progress: 100 },
       },
       { status: 200 }
     )

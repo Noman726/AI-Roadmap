@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma, resolveDbUserId } from "@/lib/db"
+import { requireAdminDb, serverTimestamp } from "@/lib/firestore"
 
 interface TaskCompletionRequest {
   userId: string
@@ -14,7 +14,7 @@ interface TaskCompletionRequest {
 export async function POST(request: NextRequest) {
   try {
     const body: TaskCompletionRequest = await request.json()
-    const { userId, email, day, taskIndex, focusArea, completedTasksCount, totalTasksCount } = body
+    const { userId, day, taskIndex, focusArea, completedTasksCount, totalTasksCount } = body
 
     if (!userId || !day || taskIndex === undefined || completedTasksCount === undefined || totalTasksCount === undefined) {
       return NextResponse.json(
@@ -23,103 +23,81 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Resolve the actual Prisma user ID (Firebase UID → Prisma CUID)
-    const dbUserId = await resolveDbUserId(userId, email)
-    if (!dbUserId) {
-      return NextResponse.json(
-        { error: "User not found in database" },
-        { status: 404 }
-      )
-    }
+    const db = requireAdminDb()
+    const userRef = db.collection("users").doc(userId)
 
-    console.log(`[mark-task] Resolved userId ${userId} → dbUserId ${dbUserId}`)
+    console.log(`[mark-task] userId=${userId}`)
 
-    // Get user's roadmap to find and update the current step
-    const roadmap = await prisma.roadmap.findFirst({
-      where: { userId: dbUserId },
-      include: { steps: true },
-    })
+    const roadmapSnapshot = await userRef.collection("roadmaps").orderBy("order", "desc").limit(1).get()
 
-    if (roadmap) {
-      // Find the step matching the focus area (don't fall back to random uncompleted steps)
-      let currentStep = roadmap.steps.find(
-        (step) => step.title.toLowerCase().includes(focusArea.toLowerCase())
-      ) || roadmap.steps.find(
-        (step) => focusArea.toLowerCase().includes(step.title.toLowerCase())
-      )
+    let notification = null
 
-      if (currentStep) {
-        // Calculate progress percentage
-        const progressPercentage = Math.round(
-          (completedTasksCount / totalTasksCount) * 100
+    if (!roadmapSnapshot.empty) {
+      const roadmapDoc = roadmapSnapshot.docs[0]
+      const stepsSnapshot = await roadmapDoc.ref.collection("steps").orderBy("order", "asc").get()
+      const steps = stepsSnapshot.docs
+
+      const currentStep =
+        steps.find((doc) =>
+          String(doc.data().title || "").toLowerCase().includes(focusArea.toLowerCase())
+        ) ||
+        steps.find((doc) =>
+          focusArea.toLowerCase().includes(String(doc.data().title || "").toLowerCase())
         )
 
-        console.log(`Step "${currentStep.title}" progress: ${completedTasksCount}/${totalTasksCount} = ${progressPercentage}%`)
+      if (currentStep) {
+        const progressPercentage = Math.round((completedTasksCount / totalTasksCount) * 100)
+        console.log(
+          `Step "${currentStep.data().title}" progress: ${completedTasksCount}/${totalTasksCount} = ${progressPercentage}%`
+        )
 
-        // Update step progress (but don't auto-complete — user must click "Mark Step as Complete")
-        await prisma.step.update({
-          where: { id: currentStep.id },
-          data: {
+        await currentStep.ref.set(
+          {
             progress: Math.min(progressPercentage, 100),
+            updatedAt: serverTimestamp(),
           },
-        })
+          { merge: true }
+        )
 
-        // Update overall progress record
-        const updatedSteps = await prisma.step.findMany({
-          where: { roadmapId: roadmap.id },
-        })
-
+        const updatedStepsSnapshot = await roadmapDoc.ref.collection("steps").get()
+        const updatedSteps = updatedStepsSnapshot.docs.map((doc) => doc.data())
         const completedStepsCount = updatedSteps.filter((s) => s.completed).length
 
-        // Find existing progress or create new one
-        const existing = await prisma.progress.findFirst({
-          where: {
-            userId: dbUserId,
-            roadmapId: roadmap.id,
+        await userRef.collection("progress").doc(roadmapDoc.id).set(
+          {
+            roadmapId: roadmapDoc.id,
+            totalSteps: updatedSteps.length,
+            completedSteps: completedStepsCount,
+            updatedAt: serverTimestamp(),
           },
-        })
-
-        if (existing) {
-          await prisma.progress.update({
-            where: { id: existing.id },
-            data: { completedSteps: completedStepsCount },
-          })
-        } else {
-          await prisma.progress.create({
-            data: {
-              userId: dbUserId,
-              roadmapId: roadmap.id,
-              totalSteps: roadmap.steps.length,
-              completedSteps: completedStepsCount,
-            },
-          })
-        }
+          { merge: true }
+        )
       }
     }
 
-    // Create a notification for task completion directly using Prisma
-    const notification = await prisma.notification.create({
-      data: {
-        userId: dbUserId,
-        type: "task_completion",
-        title: "Great Job! Task Completed 🎉",
-        message: `You've completed a task in your study plan for "${focusArea}". Keep up the momentum!`,
-        metadata: JSON.stringify({
-          day,
-          taskIndex,
-          focusArea,
-          completedCount: completedTasksCount,
-          totalCount: totalTasksCount,
-          timestamp: new Date().toISOString(),
-        }),
+    notification = await userRef.collection("notifications").add({
+      userId,
+      type: "task_completion",
+      title: "Great Job! Task Completed 🎉",
+      message: `You've completed a task in your study plan for "${focusArea}". Keep up the momentum!`,
+      metadata: {
+        day,
+        taskIndex,
+        focusArea,
+        completedCount: completedTasksCount,
+        totalCount: totalTasksCount,
+        timestamp: new Date().toISOString(),
       },
+      read: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     })
 
     return NextResponse.json(
       { 
         success: true,
         message: "Task marked as completed and progress updated",
-        notification,
+        notification: { id: notification.id },
         progress: {
           completedTasks: completedTasksCount,
           totalTasks: totalTasksCount,

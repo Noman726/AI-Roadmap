@@ -157,15 +157,6 @@ Example user document:
 
 ---
 
-## ⚙️ Optional: Migrate from Prisma to Firestore
-
-If you want to use Firestore instead of SQLite:
-1. Update API routes to use `adminDb` instead of `prisma`
-2. Keep Prisma for reference, or remove it
-3. Update database calls from Prisma syntax to Firestore queries
-
----
-
 ## 🔧 Troubleshooting
 
 **Error: "Missing Firebase credentials"**

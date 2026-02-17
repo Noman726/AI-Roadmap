@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ArrowRight, ArrowLeft, Loader2 } from "lucide-react"
-import { saveProfile } from "@/lib/actions"
+import { doc, setDoc, serverTimestamp } from "firebase/firestore"
+import { db } from "@/lib/firebase"
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1)
@@ -30,19 +31,27 @@ export default function OnboardingPage() {
   const handleSubmit = async () => {
     if (!user) return
 
+    const profileData = {
+      interests,
+      educationLevel,
+      careerGoal,
+      currentSkillLevel,
+      learningStyle,
+      studyTime,
+    }
+
     setIsLoading(true)
     try {
-      const profileData = {
-        interests,
-        educationLevel,
-        careerGoal,
-        currentSkillLevel,
-        learningStyle,
-        studyTime,
-      }
-
       // Save to database
-      await saveProfile(user.id, profileData)
+      const response = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id, email: user.email, name: user.name, profileData }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to save profile")
+      }
 
       // Also store in localStorage as fallback
       localStorage.setItem(`profile_${user.id}`, JSON.stringify(profileData))
@@ -51,15 +60,22 @@ export default function OnboardingPage() {
       router.push("/dashboard")
     } catch (error) {
       console.error("Error saving profile:", error)
-      // Fallback: save to localStorage only if database fails
-      const profileData = {
-        interests,
-        educationLevel,
-        careerGoal,
-        currentSkillLevel,
-        learningStyle,
-        studyTime,
+      try {
+        await setDoc(
+          doc(db, "users", user.id),
+          {
+            email: user.email || null,
+            name: user.name || null,
+            profile: profileData,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        )
+      } catch (firestoreError) {
+        console.warn("Failed to save profile to Firestore:", firestoreError)
       }
+      // Fallback: save to localStorage only if database fails
       localStorage.setItem(`profile_${user.id}`, JSON.stringify(profileData))
       router.push("/dashboard")
     } finally {

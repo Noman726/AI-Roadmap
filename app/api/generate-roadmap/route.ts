@@ -1,19 +1,106 @@
 import { groq } from "@ai-sdk/groq"
+import { generateText } from "ai"
 
 export async function POST(req: Request) {
   const { profile } = await req.json()
 
   try {
-    // Use fast local generator instead of slow AI generateObject
+    // Try AI-generated roadmap first
+    const aiRoadmap = await generateAIRoadmap(profile)
+    if (aiRoadmap) {
+      return Response.json({ roadmap: aiRoadmap })
+    }
+  } catch (error) {
+    console.error("AI Roadmap Generation failed, using fallback:", error)
+  }
+
+  try {
     const roadmap = generateFallbackRoadmap(profile)
     return Response.json({ roadmap })
   } catch (error) {
     console.error("Roadmap Generation failed:", error)
     return Response.json(
-      { error: "Failed to generate roadmap" }, 
+      { error: "Failed to generate roadmap" },
       { status: 500 }
     )
   }
+}
+
+async function generateAIRoadmap(profile: any) {
+  const goal = profile?.careerGoal || "Software Developer"
+  const skillLevel = profile?.currentSkillLevel || "beginner"
+  const learningStyle = profile?.learningStyle || "visual"
+  const studyTime = profile?.studyTime || "5-10"
+  const interests = profile?.interests || "general software"
+  const educationLevel = profile?.educationLevel || "self-taught"
+
+  const prompt = `You are an expert learning designer. Create a personalized roadmap for a student.
+
+Student profile:
+- Career goal: ${goal}
+- Skill level: ${skillLevel}
+- Learning style: ${learningStyle}
+- Study time: ${studyTime} hours/week
+- Interests: ${interests}
+- Education level: ${educationLevel}
+
+Requirements:
+- Create 4 to 6 steps, each with id (step-1, step-2, ...), title, description, duration, skills (array), resources (array with title, type, url, description), milestones (array).
+- Provide a realistic estimatedTimeframe.
+- Provide a weeklySchedule object with monday-sunday strings.
+- Make the roadmap specific to the career goal (do not reuse generic web/dev steps).
+
+Respond ONLY with valid JSON (no markdown, no code fences):
+{
+  "careerPath": "...",
+  "overview": "...",
+  "estimatedTimeframe": "...",
+  "steps": [
+    {
+      "id": "step-1",
+      "title": "...",
+      "description": "...",
+      "duration": "...",
+      "skills": ["..."],
+      "resources": [
+        { "title": "...", "type": "course", "url": "https://...", "description": "..." }
+      ],
+      "milestones": ["..."]
+    }
+  ],
+  "weeklySchedule": {
+    "monday": "...",
+    "tuesday": "...",
+    "wednesday": "...",
+    "thursday": "...",
+    "friday": "...",
+    "saturday": "...",
+    "sunday": "..."
+  }
+}`
+
+  const { text } = await generateText({
+    model: groq("llama-3.3-70b-versatile"),
+    prompt,
+    temperature: 0.7,
+    maxOutputTokens: 1200,
+  })
+
+  const cleanText = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()
+  const roadmap = JSON.parse(cleanText)
+
+  if (!roadmap?.careerPath || !Array.isArray(roadmap.steps) || roadmap.steps.length < 3) {
+    throw new Error("Invalid roadmap structure")
+  }
+
+  const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+  for (const day of days) {
+    if (!roadmap.weeklySchedule || !roadmap.weeklySchedule[day]) {
+      throw new Error("Missing weekly schedule")
+    }
+  }
+
+  return roadmap
 }
 
 function generateFallbackRoadmap(profile: any) {
@@ -100,6 +187,43 @@ function generateFallbackRoadmap(profile: any) {
         ],
         skills: ["Pandas", "NumPy", "Data Cleaning", "Visualization"],
         milestones: ["Analyze a public dataset", "Create a visualization dashboard"]
+      }
+    ]
+  } else if (isDesign) {
+    roadmap.steps = [
+      {
+        id: "step-1",
+        title: "Design Fundamentals",
+        description: "Build a strong foundation in visual hierarchy, typography, and layout.",
+        duration: "4 Weeks",
+        resources: [
+          { title: "Refactoring UI", type: "book", url: "https://www.refactoringui.com", description: "Practical visual design guidance." },
+          { title: "Material Design", type: "documentation", url: "https://m3.material.io", description: "UI patterns and systems." }
+        ],
+        skills: ["Typography", "Color", "Spacing", "Layout"],
+        milestones: ["Redesign a landing page", "Build a type scale and color system"]
+      },
+      {
+        id: "step-2",
+        title: "UX Research and Flows",
+        description: "Learn how to map user journeys and validate assumptions with research.",
+        duration: "5 Weeks",
+        resources: [
+          { title: "NNGroup Articles", type: "article", url: "https://www.nngroup.com/articles/", description: "Evidence-based UX guidance." }
+        ],
+        skills: ["User research", "Personas", "Journey mapping", "Information architecture"],
+        milestones: ["Create a user journey map", "Run 3 short interviews"]
+      },
+      {
+        id: "step-3",
+        title: "UI Systems and Prototyping",
+        description: "Design reusable components and test workflows with prototypes.",
+        duration: "6 Weeks",
+        resources: [
+          { title: "Figma Learn", type: "course", url: "https://www.figma.com/resources/learn-design/", description: "Hands-on UI tooling." }
+        ],
+        skills: ["Component libraries", "Auto-layout", "Prototyping"],
+        milestones: ["Design a mini design system", "Prototype a core user flow"]
       }
     ]
   } else {
