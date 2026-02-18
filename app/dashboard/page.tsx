@@ -12,12 +12,14 @@ import { Sparkles, Target, BookOpen, TrendingUp, ArrowRight, Loader2, Trophy, Ch
 import { getUserRoadmap } from "@/lib/actions"
 import type { Profile, Roadmap } from "@/lib/types"
 
+type RoadmapSummary = Omit<Roadmap, "steps"> & { steps?: Roadmap["steps"] }
+
 export default function DashboardPage() {
   const { user, isLoading: authLoading } = useAuth()
   const router = useRouter()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null)
-  const [completedRoadmaps, setCompletedRoadmaps] = useState<Roadmap[]>([])
+  const [completedRoadmaps, setCompletedRoadmaps] = useState<RoadmapSummary[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [overallProgress, setOverallProgress] = useState(0)
 
@@ -62,7 +64,7 @@ export default function DashboardPage() {
       const loadRoadmap = async () => {
         try {
           // Fetch all roadmaps (history) from API
-          const historyRes = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}&history=true`)
+          const historyRes = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}&history=true&includeSteps=false`)
           if (historyRes.ok) {
             const { roadmaps } = await historyRes.json()
             if (roadmaps && roadmaps.length > 0) {
@@ -76,10 +78,20 @@ export default function DashboardPage() {
                 ? active[active.length - 1]
                 : roadmaps[roadmaps.length - 1]
 
-              setRoadmap(current)
-              calculateProgress(current)
-              localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(current))
-              return
+              if (current?.id) {
+                const currentResponse = await fetch(
+                  `/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}&roadmapId=${current.id}`
+                )
+                if (currentResponse.ok) {
+                  const { roadmap: currentRoadmap } = await currentResponse.json()
+                  if (currentRoadmap) {
+                    setRoadmap(currentRoadmap)
+                    calculateProgress(currentRoadmap)
+                    localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(currentRoadmap))
+                    return
+                  }
+                }
+              }
             }
           }
         } catch (error) {
@@ -149,19 +161,31 @@ export default function DashboardPage() {
     if (!user) return
 
     const interval = setInterval(async () => {
+      if (document.visibilityState !== "visible") return
       try {
-        const response = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}&history=true`)
-        if (response.ok) {
-          const { roadmaps } = await response.json()
-          if (roadmaps && roadmaps.length > 0) {
-            const completed = roadmaps.filter((r: any) => r.completedAt !== null)
-            const active = roadmaps.filter((r: any) => r.completedAt === null)
-            setCompletedRoadmaps(completed)
-            const current = active.length > 0
-              ? active[active.length - 1]
-              : roadmaps[roadmaps.length - 1]
-            setRoadmap(current)
-            calculateProgress(current)
+        const historyRes = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}&history=true&includeSteps=false`)
+        if (!historyRes.ok) return
+
+        const { roadmaps } = await historyRes.json()
+        if (!roadmaps || roadmaps.length === 0) return
+
+        const completed = roadmaps.filter((r: any) => r.completedAt !== null)
+        const active = roadmaps.filter((r: any) => r.completedAt === null)
+        setCompletedRoadmaps(completed)
+        const current = active.length > 0
+          ? active[active.length - 1]
+          : roadmaps[roadmaps.length - 1]
+
+        if (!current?.id) return
+
+        const currentResponse = await fetch(
+          `/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}&roadmapId=${current.id}`
+        )
+        if (currentResponse.ok) {
+          const { roadmap: currentRoadmap } = await currentResponse.json()
+          if (currentRoadmap) {
+            setRoadmap(currentRoadmap)
+            calculateProgress(currentRoadmap)
           }
         }
       } catch (error) {
@@ -387,37 +411,43 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {completedRoadmaps.map((cr, idx) => (
-                      <div
-                        key={cr.id || idx}
-                        className="flex items-center gap-4 rounded-lg border border-green-200 bg-green-50 p-4 cursor-pointer hover:bg-green-100 hover:border-green-300 transition-colors"
-                        onClick={() => router.push(`/roadmap?viewId=${cr.id}`)}
-                      >
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-500 text-white font-bold text-sm">
-                          <CheckCircle2 className="h-5 w-5" />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-balance font-medium">{cr.careerPath}</h4>
-                            <Badge variant="secondary" className="bg-green-100 text-green-700">
-                              Roadmap {cr.order || idx + 1}
-                            </Badge>
+                    {completedRoadmaps.map((cr, idx) => {
+                      const stepsCount = Array.isArray(cr.steps) ? cr.steps.length : null
+
+                      return (
+                        <div
+                          key={cr.id || idx}
+                          className="flex items-center gap-4 rounded-lg border border-green-200 bg-green-50 p-4 cursor-pointer hover:bg-green-100 hover:border-green-300 transition-colors"
+                          onClick={() => router.push(`/roadmap?viewId=${cr.id}`)}
+                        >
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-500 text-white font-bold text-sm">
+                            <CheckCircle2 className="h-5 w-5" />
                           </div>
-                          <p className="text-balance text-sm text-muted-foreground">
-                            {cr.steps.length} steps completed • {cr.estimatedTimeframe}
-                          </p>
-                          {cr.completedAt && (
-                            <p className="text-xs text-green-600 mt-1">
-                              Completed on {new Date(cr.completedAt).toLocaleDateString()}
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-balance font-medium">{cr.careerPath}</h4>
+                              <Badge variant="secondary" className="bg-green-100 text-green-700">
+                                Roadmap {cr.order || idx + 1}
+                              </Badge>
+                            </div>
+                            <p className="text-balance text-sm text-muted-foreground">
+                              {stepsCount !== null
+                                ? `${stepsCount} steps completed • ${cr.estimatedTimeframe}`
+                                : cr.estimatedTimeframe}
                             </p>
-                          )}
+                            {cr.completedAt && (
+                              <p className="text-xs text-green-600 mt-1">
+                                Completed on {new Date(cr.completedAt).toLocaleDateString()}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge className="bg-green-500 text-white">100%</Badge>
+                            <ArrowRight className="h-4 w-4 text-green-600" />
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge className="bg-green-500 text-white">100%</Badge>
-                          <ArrowRight className="h-4 w-4 text-green-600" />
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </CardContent>
               </Card>

@@ -59,12 +59,12 @@ export async function POST(request: NextRequest) {
 
       const currentStep =
         (stepId
-          ? steps.find((doc) => String(doc.data().id || doc.id) === stepId)
+          ? steps.find((doc: any) => String(doc.data().id || doc.id) === stepId)
           : null) ||
-        steps.find((doc) =>
+        steps.find((doc: any) =>
           String(doc.data().title || "").toLowerCase().includes(focusArea.toLowerCase())
         ) ||
-        steps.find((doc) =>
+        steps.find((doc: any) =>
           focusArea.toLowerCase().includes(String(doc.data().title || "").toLowerCase())
         )
 
@@ -82,14 +82,12 @@ export async function POST(request: NextRequest) {
           { merge: true }
         )
 
-        const updatedStepsSnapshot = await roadmapDoc.ref.collection("steps").get()
-        const updatedSteps = updatedStepsSnapshot.docs.map((doc) => doc.data())
-        const completedStepsCount = updatedSteps.filter((s) => s.completed).length
+        const completedStepsCount = steps.filter((doc: any) => Boolean(doc.data().completed)).length
 
         await userRef.collection("progress").doc(roadmapDoc.id).set(
           {
             roadmapId: roadmapDoc.id,
-            totalSteps: updatedSteps.length,
+            totalSteps: steps.length,
             completedSteps: completedStepsCount,
             updatedAt: serverTimestamp(),
           },

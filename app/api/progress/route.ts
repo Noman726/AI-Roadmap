@@ -14,7 +14,15 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const db = requireAdminDb()
+    let db: any
+    try {
+      db = requireAdminDb()
+    } catch (error) {
+      return NextResponse.json(
+        { progress: null, message: "Using local storage" },
+        { status: 200 }
+      )
+    }
     const progressDoc = await db
       .collection("users")
       .doc(userId)
@@ -37,7 +45,7 @@ export async function GET(request: NextRequest) {
       : 0
 
     const response = NextResponse.json(
-      { 
+      {
         progress: {
           id: progressDoc.id,
           ...progress,
@@ -46,10 +54,10 @@ export async function GET(request: NextRequest) {
       },
       { status: 200 }
     )
-    
+
     // Cache progress data for 10 seconds
-    response.headers.set('Cache-Control', 'public, max-age=10, s-maxage=10')
-    
+    response.headers.set("Cache-Control", "private, max-age=10, s-maxage=10")
+
     return response
   } catch (error) {
     console.error("Error fetching progress:", error)

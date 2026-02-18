@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
     const userId = searchParams.get("userId")
     const history = searchParams.get("history") // If "true", return all roadmaps
     const roadmapId = searchParams.get("roadmapId") // Fetch specific roadmap by ID
+    const includeSteps = searchParams.get("includeSteps") !== "false"
 
     if (!userId) {
       return NextResponse.json(
@@ -31,10 +32,22 @@ export async function GET(request: NextRequest) {
     if (history === "true") {
       // Return ALL roadmaps for this user (completed + active), ordered by order
       const roadmapsSnapshot = await roadmapsRef.orderBy("order", "asc").get()
+
+      if (!includeSteps) {
+        const formattedRoadmaps = roadmapsSnapshot.docs.map((doc: any) => ({
+          id: doc.id,
+          ...doc.data(),
+        }))
+
+        const response = NextResponse.json({ roadmaps: formattedRoadmaps }, { status: 200 })
+        response.headers.set("Cache-Control", "private, max-age=30, s-maxage=30")
+        return response
+      }
+
       const formattedRoadmaps = await Promise.all(
-        roadmapsSnapshot.docs.map(async (doc) => {
+        roadmapsSnapshot.docs.map(async (doc: any) => {
           const stepsSnapshot = await doc.ref.collection("steps").orderBy("order", "asc").get()
-          const steps = stepsSnapshot.docs.map((stepDoc) => ({
+          const steps = stepsSnapshot.docs.map((stepDoc: any) => ({
             id: stepDoc.id,
             ...stepDoc.data(),
           }))
@@ -47,7 +60,9 @@ export async function GET(request: NextRequest) {
         })
       )
 
-      return NextResponse.json({ roadmaps: formattedRoadmaps }, { status: 200 })
+      const response = NextResponse.json({ roadmaps: formattedRoadmaps }, { status: 200 })
+      response.headers.set("Cache-Control", "private, max-age=30, s-maxage=30")
+      return response
     }
 
     // Fetch a specific roadmap by ID
@@ -59,7 +74,7 @@ export async function GET(request: NextRequest) {
       }
 
       const stepsSnapshot = await roadmapDoc.ref.collection("steps").orderBy("order", "asc").get()
-      const steps = stepsSnapshot.docs.map((stepDoc) => ({
+      const steps = stepsSnapshot.docs.map((stepDoc: any) => ({
         id: stepDoc.id,
         ...stepDoc.data(),
       }))
@@ -70,7 +85,10 @@ export async function GET(request: NextRequest) {
         steps,
       }
 
-      return NextResponse.json({ roadmap: formatted }, { status: 200 })
+      const response = NextResponse.json({ roadmap: formatted }, { status: 200 })
+      const cacheTime = formatted.completedAt ? 300 : 30
+      response.headers.set("Cache-Control", `private, max-age=${cacheTime}, s-maxage=${cacheTime}`)
+      return response
     }
 
     // Get user's LATEST ACTIVE (non-completed) roadmap
@@ -85,9 +103,9 @@ export async function GET(request: NextRequest) {
     }
 
     const roadmapDoc =
-      latestSnapshot.docs.find((doc) => doc.data().completedAt == null) || latestSnapshot.docs[0]
+      latestSnapshot.docs.find((doc: any) => doc.data().completedAt == null) || latestSnapshot.docs[0]
     const stepsSnapshot = await roadmapDoc.ref.collection("steps").orderBy("order", "asc").get()
-    const steps = stepsSnapshot.docs.map((stepDoc) => ({
+    const steps = stepsSnapshot.docs.map((stepDoc: any) => ({
       id: stepDoc.id,
       ...stepDoc.data(),
     }))
@@ -102,11 +120,11 @@ export async function GET(request: NextRequest) {
       { roadmap: formattedRoadmap },
       { status: 200 }
     )
-    
+
     // Cache active roadmaps for 30 seconds, completed roadmaps longer
     const cacheTime = formattedRoadmap.completedAt ? 3600 : 30
-    response.headers.set('Cache-Control', `public, max-age=${cacheTime}, s-maxage=${cacheTime}`)
-    
+    response.headers.set("Cache-Control", `private, max-age=${cacheTime}, s-maxage=${cacheTime}`)
+
     return response
   } catch (error) {
     console.error("Error fetching roadmap:", error)
