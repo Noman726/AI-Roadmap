@@ -61,7 +61,7 @@ export function NotificationProvider({
 
     setIsLoading(true)
     try {
-      const response = await fetch("/api/notifications", {
+      const response = await fetch(`/api/notifications?userId=${user.id}`, {
         headers: getHeaders(),
       })
       if (response.ok) {
@@ -85,7 +85,7 @@ export function NotificationProvider({
       if (!user?.id) return null
 
       try {
-        const response = await fetch("/api/notifications", {
+        const response = await fetch(`/api/notifications?userId=${user.id}`, {
           method: "POST",
           headers: getHeaders(),
           body: JSON.stringify(data),
@@ -108,7 +108,7 @@ export function NotificationProvider({
       if (!user?.id) return
 
       try {
-        const response = await fetch(`/api/notifications/${id}`, {
+        const response = await fetch(`/api/notifications/${id}?userId=${user.id}`, {
           method: "PUT",
           headers: getHeaders(),
           body: JSON.stringify({ read: true }),
@@ -130,7 +130,7 @@ export function NotificationProvider({
       if (!user?.id) return
 
       try {
-        const response = await fetch(`/api/notifications/${id}`, {
+        const response = await fetch(`/api/notifications/${id}?userId=${user.id}`, {
           method: "DELETE",
           headers: getHeaders(),
         })

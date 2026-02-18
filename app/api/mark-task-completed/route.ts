@@ -24,11 +24,30 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const db = requireAdminDb()
+    console.log(`[mark-task] userId=${userId}, day=${day}, taskIndex=${taskIndex}`)
+
+    let db: any
+    try {
+      db = requireAdminDb()
+    } catch (error) {
+      console.warn("[mark-task] Firebase Admin not configured, returning success anyway:", error)
+      // If Firebase Admin is not configured, still return success
+      // The client will handle persistence via localStorage
+      return NextResponse.json(
+        { 
+          success: true,
+          message: "Task marked as completed (client-side only)",
+          progress: {
+            completedTasks: completedTasksCount,
+            totalTasks: totalTasksCount,
+            percentage: Math.round((completedTasksCount / totalTasksCount) * 100),
+          },
+        },
+        { status: 200 }
+      )
+    }
+
     const userRef = db.collection("users").doc(userId)
-
-    console.log(`[mark-task] userId=${userId}`)
-
     const roadmapSnapshot = await userRef.collection("roadmaps").orderBy("order", "desc").limit(1).get()
 
     let notification = null
@@ -79,29 +98,33 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    notification = await userRef.collection("notifications").add({
-      userId,
-      type: "task_completion",
-      title: "Great Job! Task Completed 🎉",
-      message: `You've completed a task in your study plan for "${focusArea}". Keep up the momentum!`,
-      metadata: {
-        day,
-        taskIndex,
-        focusArea,
-        completedCount: completedTasksCount,
-        totalCount: totalTasksCount,
-        timestamp: new Date().toISOString(),
-      },
-      read: false,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    })
+    try {
+      notification = await userRef.collection("notifications").add({
+        userId,
+        type: "task_completion",
+        title: "Great Job! Task Completed 🎉",
+        message: `You've completed a task in your study plan for "${focusArea}". Keep up the momentum!`,
+        metadata: {
+          day,
+          taskIndex,
+          focusArea,
+          completedCount: completedTasksCount,
+          totalCount: totalTasksCount,
+          timestamp: new Date().toISOString(),
+        },
+        read: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    } catch (notifError) {
+      console.warn("[mark-task] Failed to create notification:", notifError)
+    }
 
     return NextResponse.json(
       { 
         success: true,
         message: "Task marked as completed and progress updated",
-        notification: { id: notification.id },
+        notification: notification ? { id: notification.id } : null,
         progress: {
           completedTasks: completedTasksCount,
           totalTasks: totalTasksCount,

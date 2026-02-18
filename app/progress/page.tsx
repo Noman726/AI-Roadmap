@@ -40,13 +40,51 @@ export default function ProgressPage() {
           const response = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}`)
           if (response.ok) {
             const { roadmap } = await response.json()
-            setRoadmap(roadmap)
-            localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(roadmap))
+            if (roadmap) {
+              // Normalize step progress - ensure progress matches completed status
+              const normalizedRoadmap = {
+                ...roadmap,
+                steps: roadmap.steps.map((step: any) => ({
+                  ...step,
+                  progress: step.completed ? 100 : 0
+                }))
+              }
+              setRoadmap(normalizedRoadmap)
+              localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(normalizedRoadmap))
+            } else {
+              // Fallback to localStorage if no roadmap returned
+              const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
+              if (storedRoadmap) {
+                const parsed = JSON.parse(storedRoadmap)
+                // Normalize step progress
+                const normalizedRoadmap = {
+                  ...parsed,
+                  steps: parsed.steps.map((step: any) => ({
+                    ...step,
+                    progress: step.completed ? 100 : 0
+                  }))
+                }
+                setRoadmap(normalizedRoadmap)
+                localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(normalizedRoadmap))
+              } else {
+                setRoadmap(null)
+              }
+            }
           } else {
             // Fallback to localStorage if server fetch fails
             const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
             if (storedRoadmap) {
-              setRoadmap(JSON.parse(storedRoadmap))
+              const parsed = JSON.parse(storedRoadmap)
+              // Normalize step progress
+              const normalizedRoadmap = {
+                ...parsed,
+                steps: parsed.steps.map((step: any) => ({
+                  ...step,
+                  progress: step.completed ? 100 : 0
+                }))
+              }
+              setRoadmap(normalizedRoadmap)
+              localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(normalizedRoadmap))
             } else {
               setRoadmap(null)
             }

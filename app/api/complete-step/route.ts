@@ -20,7 +20,22 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    const db = requireAdminDb()
+    let db: any
+    try {
+      db = requireAdminDb()
+    } catch (error) {
+      console.warn("[complete-step] Firebase Admin not configured:", error)
+      // If Firebase Admin is not configured, still return success
+      // The client will handle persistence via localStorage
+      return NextResponse.json(
+        { 
+          success: true,
+          message: "Step marked as complete (client-side only)"
+        },
+        { status: 200 }
+      )
+    }
+
     const userRef = db.collection("users").doc(userId)
 
     console.log(`[complete-step] userId=${userId}, stepId=${stepId}, stepTitle=${stepTitle}`)

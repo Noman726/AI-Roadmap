@@ -49,33 +49,18 @@ export default function OnboardingPage() {
         body: JSON.stringify({ userId: user.id, email: user.email, name: user.name, profileData }),
       })
 
-      if (!response.ok) {
-        throw new Error("Failed to save profile")
-      }
-
-      // Also store in localStorage as fallback
+      // Store in localStorage regardless of API success
       localStorage.setItem(`profile_${user.id}`, JSON.stringify(profileData))
+
+      if (!response.ok) {
+        console.warn("Failed to save profile to database, using localStorage only")
+      }
 
       // Redirect to dashboard
       router.push("/dashboard")
     } catch (error) {
       console.error("Error saving profile:", error)
-      try {
-        await setDoc(
-          doc(db, "users", user.id),
-          {
-            email: user.email || null,
-            name: user.name || null,
-            profile: profileData,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        )
-      } catch (firestoreError) {
-        console.warn("Failed to save profile to Firestore:", firestoreError)
-      }
-      // Fallback: save to localStorage only if database fails
+      // Fallback: save to localStorage and continue
       localStorage.setItem(`profile_${user.id}`, JSON.stringify(profileData))
       router.push("/dashboard")
     } finally {

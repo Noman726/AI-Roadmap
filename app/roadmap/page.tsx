@@ -106,11 +106,20 @@ function RoadmapContent() {
             if (response.ok) {
               const data = await response.json()
               if (data.roadmap) {
-                setRoadmap(data.roadmap)
-                localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(data.roadmap))
-                if (data.roadmap.steps?.length > 0 && data.roadmap.steps.every((s: any) => s.completed)) {
+                // Normalize step progress
+                const normalizedRoadmap = {
+                  ...data.roadmap,
+                  steps: data.roadmap.steps.map((step: any) => ({
+                    ...step,
+                    progress: step.completed ? 100 : 0
+                  }))
+                }
+                setRoadmap(normalizedRoadmap)
+                localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(normalizedRoadmap))
+                if (normalizedRoadmap.steps?.length > 0 && normalizedRoadmap.steps.every((s: any) => s.completed)) {
                   setShowCelebration(true)
                 }
+                setIsRoadmapLoading(false)
                 return
               }
             }
@@ -121,8 +130,17 @@ function RoadmapContent() {
           const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
           if (storedRoadmap) {
             const parsed = JSON.parse(storedRoadmap)
-            setRoadmap(parsed)
-            if (parsed.steps?.length > 0 && parsed.steps.every((s: any) => s.completed)) {
+            // Normalize step progress
+            const normalizedRoadmap = {
+              ...parsed,
+              steps: parsed.steps.map((step: any) => ({
+                ...step,
+                progress: step.completed ? 100 : 0
+              }))
+            }
+            setRoadmap(normalizedRoadmap)
+            localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(normalizedRoadmap))
+            if (normalizedRoadmap.steps?.length > 0 && normalizedRoadmap.steps.every((s: any) => s.completed)) {
               setShowCelebration(true)
             }
           } else {
@@ -141,7 +159,7 @@ function RoadmapContent() {
     if (!roadmap || !user) return
 
     const updatedSteps = roadmap.steps.map((step) =>
-      step.id === stepId ? { ...step, completed: !step.completed } : step,
+      step.id === stepId ? { ...step, completed: !step.completed, progress: !step.completed ? 100 : 0 } : step,
     )
 
     const updatedRoadmap = { ...roadmap, steps: updatedSteps }
@@ -157,7 +175,7 @@ function RoadmapContent() {
     // Try to save to database
     try {
       const step = updatedSteps.find(s => s.id === stepId)
-      if (step) {
+      if (step && typeof step.completed === 'boolean') {
         await updateStepCompletion(user.id, stepId, step.completed)
       }
     } catch (error) {

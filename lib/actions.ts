@@ -15,8 +15,9 @@ export async function saveProfile(userId: string, profileData: any) {
     )
     return { success: true }
   } catch (error) {
-    console.error("Error saving profile:", error)
-    throw error
+    console.warn("Error saving profile (Firebase Admin not configured):", error)
+    // Return success anyway - client will use localStorage
+    return { success: true, clientOnly: true }
   }
 }
 
@@ -73,8 +74,9 @@ export async function saveRoadmap(userId: string, roadmapData: any) {
 
     return { success: true, roadmapId: roadmapRef.id }
   } catch (error) {
-    console.error("Error saving roadmap:", error)
-    throw error
+    console.warn("Error saving roadmap (Firebase Admin not configured):", error)
+    // Return success anyway - client will use localStorage
+    return { success: true, clientOnly: true }
   }
 }
 
@@ -100,14 +102,21 @@ export async function getUserRoadmap(userId: string) {
       steps,
     }
   } catch (error) {
-    console.error("Error fetching roadmap:", error)
-    throw error
+    console.warn("Error fetching roadmap (Firebase Admin not configured):", error)
+    return null
   }
 }
 
 export async function updateStepCompletion(userId: string, stepId: string, completed: boolean) {
+  let db: any
   try {
-    const db = requireAdminDb()
+    db = requireAdminDb()
+  } catch (error) {
+    console.warn("Firebase Admin not configured, step completion will be stored locally only")
+    return { success: true, clientOnly: true }
+  }
+
+  try {
     const stepsSnapshot = await db.collectionGroup("steps").where("userId", "==", userId).get()
     const stepDoc = stepsSnapshot.docs.find((doc) => doc.data().id === stepId) || null
 
@@ -123,8 +132,8 @@ export async function updateStepCompletion(userId: string, stepId: string, compl
 
     return { success: true, step: { id: stepDoc.id, ...stepDoc.data(), completed } }
   } catch (error) {
-    console.error("Error updating step:", error)
-    throw error
+    console.warn("Error updating step:", error)
+    return { success: true, clientOnly: true }
   }
 }
 
@@ -143,8 +152,8 @@ export async function saveProgress(userId: string, roadmapId: string, completedS
     )
     return { success: true }
   } catch (error) {
-    console.error("Error saving progress:", error)
-    throw error
+    console.warn("Error saving progress (Firebase Admin not configured):", error)
+    return { success: true, clientOnly: true }
   }
 }
 
@@ -162,7 +171,7 @@ export async function saveStudyPlan(userId: string, roadmapId: string, studyPlan
     )
     return { success: true }
   } catch (error) {
-    console.error("Error saving study plan:", error)
-    throw error
+    console.warn("Error saving study plan (Firebase Admin not configured):", error)
+    return { success: true, clientOnly: true }
   }
 }

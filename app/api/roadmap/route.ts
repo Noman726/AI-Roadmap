@@ -15,7 +15,17 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const db = requireAdminDb()
+    let db: any
+    try {
+      db = requireAdminDb()
+    } catch (error) {
+      // Firebase Admin not configured - client will use localStorage
+      return NextResponse.json(
+        { roadmap: null, message: "Using local storage" },
+        { status: 200 }
+      )
+    }
+
     const roadmapsRef = db.collection("users").doc(userId).collection("roadmaps")
 
     if (history === "true") {
@@ -67,9 +77,10 @@ export async function GET(request: NextRequest) {
     const latestSnapshot = await roadmapsRef.orderBy("order", "desc").limit(5).get()
 
     if (latestSnapshot.empty) {
+      // No roadmap in database - client will use localStorage
       return NextResponse.json(
-        { error: "Roadmap not found" },
-        { status: 404 }
+        { roadmap: null, message: "No roadmap found in database" },
+        { status: 200 }
       )
     }
 

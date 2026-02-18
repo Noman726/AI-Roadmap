@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useState } from "react"
+import { Suspense, useEffect, useState, useRef } from "react"
 import { useAuth } from "@/lib/auth-context"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Navbar } from "@/components/navbar"
@@ -91,19 +91,30 @@ function StudyPlanContent() {
   const [isMarkingComplete, setIsMarkingComplete] = useState<string | null>(null)
   const [isMarkingStepComplete, setIsMarkingStepComplete] = useState(false)
   const [targetStepId, setTargetStepId] = useState<string | null>(stepIdParam)
+  const [isLoadingRoadmap, setIsLoadingRoadmap] = useState(true)
+  const hasLoadedRoadmap = useRef(false)
   const [notification, setNotification] = useState<{
     type: "success" | "error" | "warning" | "info"
     title: string
     description?: string
   } | null>(null)
 
-  const markTaskAsCompleted = async (day: string, taskIndex: number) => {
-    if (!user || !studyPlan) return
+  const toggleTaskCompletion = async (day: string, taskIndex: number) => {
+    if (!user || !studyPlan) {
+      return
+    }
 
     const taskId = `${day}-${taskIndex}`
-    if (completedTasks.has(taskId)) return
+    const isCurrentlyCompleted = completedTasks.has(taskId)
+    
     const nextCompletedTasks = new Set(completedTasks)
-    nextCompletedTasks.add(taskId)
+    
+    // Toggle: if completed, uncomplete it; if uncompleted, complete it
+    if (isCurrentlyCompleted) {
+      nextCompletedTasks.delete(taskId)
+    } else {
+      nextCompletedTasks.add(taskId)
+    }
     const currentStepForTask = targetStepId
       ? roadmap?.steps.find((s) => s.id === targetStepId)
       : roadmap?.steps.find((s) => !s.completed)
@@ -113,7 +124,9 @@ function StudyPlanContent() {
     
     // Optimistic update
     setCompletedTasks(nextCompletedTasks)
+    // Save to BOTH step-specific and general keys to ensure persistence
     localStorage.setItem(stepScopedTasksKey, JSON.stringify(Array.from(nextCompletedTasks)))
+    localStorage.setItem(`completedTasks_${user.id}`, JSON.stringify(Array.from(nextCompletedTasks)))
     setIsMarkingComplete(taskId)
 
     try {
@@ -146,8 +159,10 @@ function StudyPlanContent() {
       // Show success notification
       setNotification({
         type: "success",
-        title: "Task Completed! 🎉",
-        description: `Great job! Task at ${studyPlan.dailyPlans[day][taskIndex].time} is marked as done. Progress: ${data.progress.percentage}%`,
+        title: isCurrentlyCompleted ? "Task Unchecked" : "Task Completed! 🎉",
+        description: isCurrentlyCompleted 
+          ? `Task at ${studyPlan.dailyPlans[day][taskIndex].time} marked as incomplete.`
+          : `Great job! Task at ${studyPlan.dailyPlans[day][taskIndex].time} is marked as done. Progress: ${data.progress.percentage}%`,
       })
 
       // Persist to localStorage
@@ -176,11 +191,15 @@ function StudyPlanContent() {
       const revertedTasks = new Set(nextCompletedTasks)
       revertedTasks.delete(taskId)
       setCompletedTasks(revertedTasks)
+      // Revert both localStorage keys
       localStorage.setItem(stepScopedTasksKey, JSON.stringify(Array.from(revertedTasks)))
+      localStorage.setItem(`completedTasks_${user.id}`, JSON.stringify(Array.from(revertedTasks)))
       setNotification({
         type: "error",
         title: "Error",
-        description: "Failed to mark task as completed. Please try again.",
+        description: isCurrentlyCompleted 
+          ? "Failed to uncheck task. Please try again."
+          : "Failed to mark task as completed. Please try again.",
       })
     } finally {
       setIsMarkingComplete(null)
@@ -193,29 +212,58 @@ function StudyPlanContent() {
       return
     }
 
-    if (user) {
+    if (user && !hasLoadedRoadmap.current) {
+      hasLoadedRoadmap.current = true
+      setIsLoadingRoadmap(true)
+      
       // Fetch roadmap from server for latest progress
       const fetchRoadmap = async () => {
+        let roadmapLoaded = false
+        
         try {
           const response = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}`)
           if (response.ok) {
             const { roadmap } = await response.json()
-            setRoadmap(roadmap)
-            localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(roadmap))
-          } else {
-            // Fallback to localStorage
-            const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
-            if (storedRoadmap) {
-              setRoadmap(JSON.parse(storedRoadmap))
+            if (roadmap) {
+              // Normalize step progress
+              const normalizedRoadmap = {
+                ...roadmap,
+                steps: roadmap.steps.map((step: any) => ({
+                  ...step,
+                  progress: step.completed ? 100 : 0
+                }))
+              }
+              setRoadmap(normalizedRoadmap)
+              localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(normalizedRoadmap))
+              roadmapLoaded = true
             }
           }
         } catch (error) {
           console.error("Error fetching roadmap:", error)
+        }
+        
+        // If no roadmap from API, try localStorage
+        if (!roadmapLoaded) {
           const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
           if (storedRoadmap) {
-            setRoadmap(JSON.parse(storedRoadmap))
+            try {
+              const parsed = JSON.parse(storedRoadmap)
+              // Normalize step progress
+              const normalizedRoadmap = {
+                ...parsed,
+                steps: parsed.steps.map((step: any) => ({
+                  ...step,
+                  progress: step.completed ? 100 : 0
+                }))
+              }
+              setRoadmap(normalizedRoadmap)
+            } catch (error) {
+              console.error("Error parsing stored roadmap:", error)
+            }
           }
         }
+        
+        setIsLoadingRoadmap(false)
       }
 
       fetchRoadmap()
@@ -238,36 +286,47 @@ function StudyPlanContent() {
     const generalPlan = localStorage.getItem(`studyPlan_${user.id}`)
     const storedStudyPlan = stepPlan || generalPlan
 
+    console.log(`[Study Plan Load] activeStepId=${activeStepId}, hasStepPlan=${!!stepPlan}, hasGeneralPlan=${!!generalPlan}`)
+
     if (storedStudyPlan) {
-      const parsed = JSON.parse(storedStudyPlan)
-
-      // Verify this plan belongs to the current roadmap's career path
-      const currentCareerPath = roadmap.careerPath?.toLowerCase() || ""
-      const planFocus = parsed.focusArea?.toLowerCase() || ""
-
-      // Check if this plan's focus area matches any step in the current roadmap
-      const matchesCurrentRoadmap = roadmap.steps.some((s: any) =>
-        planFocus.includes(s.title.toLowerCase()) ||
-        s.title.toLowerCase().includes(planFocus)
-      )
-
-      if (matchesCurrentRoadmap) {
-        // Plan belongs to current roadmap
-        if (activeStep && parsed.focusArea &&
-            (parsed.focusArea.toLowerCase().includes(activeStep.title.toLowerCase()) ||
-             activeStep.title.toLowerCase().includes(parsed.focusArea.toLowerCase()) ||
-             !targetStepId)) {
+      try {
+        const parsed = JSON.parse(storedStudyPlan)
+        console.log(`[Study Plan Load] Loaded plan for: ${parsed.focusArea}`)
+        
+        // If we have a step-specific plan, use it
+        if (stepPlan) {
+          console.log(`[Study Plan Load] Using step-specific plan`)
           setStudyPlan(parsed)
-        } else if (stepPlan) {
+        } 
+        // If we have a general plan and no target step specified, use it
+        else if (!targetStepId) {
+          console.log(`[Study Plan Load] Using general plan (no target step)`)
           setStudyPlan(parsed)
+        }
+        // If general plan matches the active step, use it
+        else if (activeStep && parsed.focusArea) {
+          const planFocus = parsed.focusArea.toLowerCase()
+          const stepTitle = activeStep.title.toLowerCase()
+          
+          // Check if focus area matches the step title
+          if (planFocus.includes(stepTitle) || stepTitle.includes(planFocus)) {
+            console.log(`[Study Plan Load] Using general plan (matches step)`)
+            setStudyPlan(parsed)
+          } else {
+            // Plan doesn't match current step, keep null to show generate button
+            console.log(`[Study Plan Load] Plan focus (${planFocus}) doesn't match step (${stepTitle})`)
+            setStudyPlan(null)
+          }
         } else {
+          console.log(`[Study Plan Load] No match, setting null`)
           setStudyPlan(null)
         }
-      } else {
-        // Stale plan from a different career path — discard it
+      } catch (error) {
+        console.error("Error parsing stored study plan:", error)
         setStudyPlan(null)
       }
     } else {
+      console.log(`[Study Plan Load] No stored study plan found`)
       setStudyPlan(null)
     }
 
@@ -276,13 +335,20 @@ function StudyPlanContent() {
     const storedCompletedTasks =
       localStorage.getItem(completedTasksKey) ||
       localStorage.getItem(`completedTasks_${user.id}`)
+    
     if (storedCompletedTasks) {
       try {
-        setCompletedTasks(new Set(JSON.parse(storedCompletedTasks)))
+        const loadedTasks = new Set<string>(JSON.parse(storedCompletedTasks))
+        // Only update if we're loading a different set of tasks
+        setCompletedTasks(prevTasks => {
+          // Preserve tasks that were just completed if they exist in localStorage
+          return loadedTasks.size >= prevTasks.size ? loadedTasks : prevTasks
+        })
       } catch (error) {
         console.error("Failed to load completed tasks:", error)
       }
     } else {
+      // Only reset if we genuinely have no stored tasks
       setCompletedTasks(new Set())
     }
   }, [user, roadmap, targetStepId])
@@ -322,6 +388,24 @@ function StudyPlanContent() {
           type: "warning",
           title: "No Active Step",
           description: "Could not find an active step matching your study plan.",
+        })
+        setIsMarkingStepComplete(false)
+        return
+      }
+
+      // Calculate total tasks and completed tasks
+      const totalTasks = Object.values(studyPlan.dailyPlans).reduce(
+        (total, dayTasks) => total + dayTasks.length,
+        0
+      )
+      const completedTaskCount = completedTasks.size
+
+      // Check if all tasks are completed
+      if (completedTaskCount < totalTasks) {
+        setNotification({
+          type: "warning",
+          title: "Tasks Incomplete",
+          description: `You have only completed ${completedTaskCount} out of ${totalTasks} tasks. Please complete all tasks before marking this step as complete.`,
         })
         setIsMarkingStepComplete(false)
         return
@@ -469,10 +553,45 @@ function StudyPlanContent() {
     }
   }
 
-  if (authLoading || !user || !roadmap) {
+  if (authLoading || isLoadingRoadmap || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  // If no roadmap exists after loading, show a message
+  if (!roadmap) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+        <Navbar />
+        <main className="container mx-auto px-4 py-8">
+          <div className="mb-8">
+            <h1 className="text-balance mb-2 text-3xl font-bold">Weekly Study Plan</h1>
+            <p className="text-balance text-muted-foreground">
+              Structured daily schedule to keep you on track and motivated
+            </p>
+          </div>
+          <Card className="border-amber-200 bg-amber-50">
+            <CardHeader>
+              <div className="flex items-start gap-3">
+                <AlertCircle className="mt-1 h-5 w-5 shrink-0 text-amber-600" />
+                <div>
+                  <CardTitle>No Roadmap Found</CardTitle>
+                  <CardDescription>
+                    Please create a learning roadmap first before generating a study plan.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={() => router.push("/dashboard")}>
+                Go to Dashboard
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
       </div>
     )
   }
@@ -655,6 +774,7 @@ function StudyPlanContent() {
                                 const taskId = `${day}-${index}`
                                 const isCompleted = completedTasks.has(taskId)
                                 const isMarking = isMarkingComplete === taskId
+                                const isAnyTaskMarking = isMarkingComplete !== null
 
                                 return (
                                   <div
@@ -719,9 +839,10 @@ function StudyPlanContent() {
                                     <Button
                                       size="sm"
                                       variant={isCompleted ? "default" : "outline"}
-                                      onClick={() => markTaskAsCompleted(day, index)}
-                                      disabled={isMarking}
+                                      onClick={() => toggleTaskCompletion(day, index)}
+                                      disabled={isAnyTaskMarking}
                                       className={isCompleted ? "bg-emerald-600 hover:bg-emerald-700" : ""}
+                                      title={isCompleted ? "Click to uncheck" : "Mark as complete"}
                                     >
                                       {isMarking ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />

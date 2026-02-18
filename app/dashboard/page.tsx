@@ -28,13 +28,34 @@ export default function DashboardPage() {
     }
 
     if (user) {
-      // Load profile from localStorage (or database via server actions)
-      const storedProfile = localStorage.getItem(`profile_${user.id}`)
-      if (storedProfile) {
-        setProfile(JSON.parse(storedProfile))
-      } else {
+      // Load profile from database first, then fallback to localStorage
+      const loadProfile = async () => {
+        try {
+          // Try to fetch profile from database
+          const response = await fetch(`/api/profile?userId=${user.id}`)
+          if (response.ok) {
+            const { profile } = await response.json()
+            if (profile) {
+              setProfile(profile)
+              // Cache in localStorage for faster subsequent loads
+              localStorage.setItem(`profile_${user.id}`, JSON.stringify(profile))
+              return true
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching profile from API:", error)
+        }
+
+        // Fallback to localStorage
+        const storedProfile = localStorage.getItem(`profile_${user.id}`)
+        if (storedProfile) {
+          setProfile(JSON.parse(storedProfile))
+          return true
+        }
+
+        // No profile found anywhere - redirect to onboarding
         router.push("/onboarding")
-        return
+        return false
       }
 
       // Load roadmap from server first, then fallback to localStorage
@@ -70,10 +91,12 @@ export default function DashboardPage() {
           const response = await fetch(`/api/roadmap?userId=${user.id}&email=${encodeURIComponent(user.email || '')}`)
           if (response.ok) {
             const { roadmap: apiRoadmap } = await response.json()
-            setRoadmap(apiRoadmap)
-            calculateProgress(apiRoadmap)
-            localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(apiRoadmap))
-            return
+            if (apiRoadmap) {
+              setRoadmap(apiRoadmap)
+              calculateProgress(apiRoadmap)
+              localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(apiRoadmap))
+              return
+            }
           }
         } catch (error) {
           console.error("Error fetching roadmap from API:", error)
@@ -95,12 +118,29 @@ export default function DashboardPage() {
         const storedRoadmap = localStorage.getItem(`roadmap_${user.id}`)
         if (storedRoadmap) {
           const roadmapData = JSON.parse(storedRoadmap)
-          setRoadmap(roadmapData)
-          calculateProgress(roadmapData)
+          // Normalize step progress
+          const normalizedRoadmap = {
+            ...roadmapData,
+            steps: roadmapData.steps.map((step: any) => ({
+              ...step,
+              progress: step.completed ? 100 : 0
+            }))
+          }
+          setRoadmap(normalizedRoadmap)
+          localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(normalizedRoadmap))
+          calculateProgress(normalizedRoadmap)
         }
       }
 
-      loadRoadmap()
+      // Load profile first, then roadmap
+      const loadData = async () => {
+        const hasProfile = await loadProfile()
+        if (hasProfile) {
+          await loadRoadmap()
+        }
+      }
+
+      loadData()
     }
   }, [user, authLoading, router])
 
@@ -132,8 +172,11 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [user])
 
-  const calculateProgress = (roadmapData: Roadmap) => {
-    if (!roadmapData.steps.length) return
+  const calculateProgress = (roadmapData: Roadmap | null) => {
+    if (!roadmapData || !roadmapData.steps || !roadmapData.steps.length) {
+      setOverallProgress(0)
+      return
+    }
 
     const completedSteps = roadmapData.steps.filter((step) => step.completed).length
     const progress = (completedSteps / roadmapData.steps.length) * 100
