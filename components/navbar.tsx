@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { NotificationBell } from "@/components/notification-bell"
+import { StreakIndicator } from "@/components/streak-indicator"
 
 export function Navbar() {
   const { user, logout } = useAuth()
@@ -59,6 +60,7 @@ export function Navbar() {
 
         {user && (
           <div className="flex items-center gap-2">
+            <StreakIndicator />
             <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

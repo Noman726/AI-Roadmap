@@ -95,3 +95,37 @@ export interface ChatMessage {
   createdAt: string
   updatedAt: string
 }
+
+export interface Badge {
+  id: string
+  name: string
+  description: string
+  icon: string
+  requirement: string
+  earnedAt?: string
+}
+
+export interface GamificationStats {
+  userId: string
+  currentStreak: number
+  longestStreak: number
+  lastActivityDate: string
+  totalPoints: number
+  level: number
+  badges: string[] // Array of badge IDs
+  stats: {
+    totalTasksCompleted: number
+    totalStepsCompleted: number
+    totalRoadmapsCompleted: number
+    totalStudyDays: number
+  }
+  updatedAt: string
+}
+
+export type ActivityType = 
+  | "daily_login"
+  | "task_completed"
+  | "step_completed"
+  | "roadmap_completed"
+  | "study_plan_generated"
+  | "chat_interaction"

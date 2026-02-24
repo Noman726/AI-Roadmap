@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdminDb, serverTimestamp } from "@/lib/firestore"
+import admin from "@/lib/firebase-admin"
 
 interface TaskCompletionRequest {
   userId: string
@@ -10,12 +11,13 @@ interface TaskCompletionRequest {
   focusArea: string
   completedTasksCount: number
   totalTasksCount: number
+  isCompleting?: boolean // true when marking complete, false when unchecking
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body: TaskCompletionRequest = await request.json()
-    const { userId, day, taskIndex, stepId, focusArea, completedTasksCount, totalTasksCount } = body
+    const { userId, day, taskIndex, stepId, focusArea, completedTasksCount, totalTasksCount, isCompleting = true } = body
 
     if (!userId || !day || taskIndex === undefined || completedTasksCount === undefined || totalTasksCount === undefined) {
       return NextResponse.json(
@@ -93,6 +95,34 @@ export async function POST(request: NextRequest) {
           },
           { merge: true }
         )
+
+        // Save completed tasks list to database for cross-device sync
+        const taskId = `${day}-${taskIndex}`
+        const tasksKey = stepId ? `${currentStep.id}` : 'general'
+        
+        if (isCompleting) {
+          // Add task to completed list
+          await userRef.collection("completedTasks").doc(tasksKey).set(
+            {
+              stepId: currentStep.id,
+              stepTitle: currentStep.data().title,
+              tasks: admin.firestore.FieldValue.arrayUnion(taskId),
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          )
+        } else {
+          // Remove task from completed list
+          await userRef.collection("completedTasks").doc(tasksKey).set(
+            {
+              stepId: currentStep.id,
+              stepTitle: currentStep.data().title,
+              tasks: admin.firestore.FieldValue.arrayRemove(taskId),
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          )
+        }
       }
     }
 

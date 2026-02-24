@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useAuth } from "@/lib/auth-context"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { Navbar } from "@/components/navbar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,6 +11,7 @@ import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { Sparkles, Target, BookOpen, TrendingUp, ArrowRight, Loader2, Trophy, CheckCircle2 } from "lucide-react"
 import { getUserRoadmap } from "@/lib/actions"
+import { GamificationDashboard } from "@/components/gamification-dashboard"
 import type { Profile, Roadmap } from "@/lib/types"
 
 type RoadmapSummary = Omit<Roadmap, "steps"> & { steps?: Roadmap["steps"] }
@@ -268,6 +270,12 @@ export default function DashboardPage() {
           </p>
         </div>
 
+        {/* Gamification Dashboard - Always show */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold mb-4">Your Learning Stats</h2>
+          <GamificationDashboard />
+        </div>
+
         {!roadmap ? (
           <Card className="mb-8">
             <CardHeader>
@@ -390,9 +398,9 @@ export default function DashboardPage() {
                   ))}
                 </div>
                 <Button className="mt-6 w-full" asChild>
-                  <a href="/roadmap">
+                  <Link href="/roadmap">
                     View Full Roadmap <ArrowRight className="ml-2 h-4 w-4" />
-                  </a>
+                  </Link>
                 </Button>
               </CardContent>
             </Card>

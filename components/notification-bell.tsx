@@ -28,6 +28,12 @@ export function NotificationBell() {
         return "⏰"
       case "achievement":
         return "🏆"
+      case "career_change":
+        return "🚀"
+      case "step_completion":
+        return "🌟"
+      case "task_completion":
+        return "✅"
       default:
         return "ℹ️"
     }
@@ -43,6 +49,12 @@ export function NotificationBell() {
         return "bg-yellow-50 border-yellow-200"
       case "achievement":
         return "bg-purple-50 border-purple-200"
+      case "career_change":
+        return "bg-indigo-50 border-indigo-200"
+      case "step_completion":
+        return "bg-teal-50 border-teal-200"
+      case "task_completion":
+        return "bg-emerald-50 border-emerald-200"
       default:
         return "bg-gray-50 border-gray-200"
     }

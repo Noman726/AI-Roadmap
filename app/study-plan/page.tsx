@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Calendar, Clock, BookOpen, Target, Loader2, AlertCircle, CheckCircle2, Circle, Youtube, FileText, ExternalLink } from "lucide-react"
 import { saveStudyPlan } from "@/lib/actions"
 import { useNotifications } from "@/lib/notification-context"
+import { useGamification } from "@/lib/gamification-context"
 import { NotificationAlert } from "@/components/notification-alert"
 import type { Roadmap } from "@/lib/types"
 
@@ -83,6 +84,7 @@ function StudyPlanContent() {
   const searchParams = useSearchParams()
   const stepIdParam = searchParams.get("stepId")
   const { createNotification } = useNotifications()
+  const { recordActivity } = useGamification()
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null)
   const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -93,6 +95,7 @@ function StudyPlanContent() {
   const [targetStepId, setTargetStepId] = useState<string | null>(stepIdParam)
   const [isLoadingRoadmap, setIsLoadingRoadmap] = useState(true)
   const hasLoadedRoadmap = useRef(false)
+  const lastLoadedStepId = useRef<string | null>(null)
   const [notification, setNotification] = useState<{
     type: "success" | "error" | "warning" | "info"
     title: string
@@ -146,6 +149,7 @@ function StudyPlanContent() {
           focusArea: studyPlan.focusArea,
           completedTasksCount: newCompletedCount,
           totalTasksCount: totalTasks,
+          isCompleting: !isCurrentlyCompleted, // true if marking complete, false if unchecking
         }),
       })
 
@@ -155,6 +159,20 @@ function StudyPlanContent() {
       }
 
       const data = await response.json()
+
+      // Record gamification activity for task completion (not for unchecking)
+      if (!isCurrentlyCompleted) {
+        try {
+          await recordActivity("task_completed", {
+            day,
+            taskIndex,
+            stepId: currentStepForTask?.id,
+            focusArea: studyPlan.focusArea,
+          })
+        } catch (err) {
+          console.warn("Failed to record gamification activity:", err)
+        }
+      }
 
       // Show success notification
       setNotification({
@@ -270,7 +288,7 @@ function StudyPlanContent() {
     }
   }, [user, authLoading, router])
 
-  // Load study plan and completed tasks when roadmap or targetStepId changes
+  // Load study plan and completed tasks when roadmap or targetStepId changes (ONLY ONCE per change)
   useEffect(() => {
     if (!user || !roadmap) return
 
@@ -280,27 +298,29 @@ function StudyPlanContent() {
       : roadmap.steps.find((s) => !s.completed)
 
     const activeStepId = activeStep?.id || ""
+    
+    // Skip if we've already loaded this step to prevent infinite loops
+    if (lastLoadedStepId.current === activeStepId) {
+      return
+    }
+    
+    lastLoadedStepId.current = activeStepId
 
     // Try loading the step-specific study plan first, then the general one
     const stepPlan = localStorage.getItem(`studyPlan_${user.id}_${activeStepId}`)
     const generalPlan = localStorage.getItem(`studyPlan_${user.id}`)
     const storedStudyPlan = stepPlan || generalPlan
 
-    console.log(`[Study Plan Load] activeStepId=${activeStepId}, hasStepPlan=${!!stepPlan}, hasGeneralPlan=${!!generalPlan}`)
-
     if (storedStudyPlan) {
       try {
         const parsed = JSON.parse(storedStudyPlan)
-        console.log(`[Study Plan Load] Loaded plan for: ${parsed.focusArea}`)
         
         // If we have a step-specific plan, use it
         if (stepPlan) {
-          console.log(`[Study Plan Load] Using step-specific plan`)
           setStudyPlan(parsed)
         } 
         // If we have a general plan and no target step specified, use it
         else if (!targetStepId) {
-          console.log(`[Study Plan Load] Using general plan (no target step)`)
           setStudyPlan(parsed)
         }
         // If general plan matches the active step, use it
@@ -310,15 +330,12 @@ function StudyPlanContent() {
           
           // Check if focus area matches the step title
           if (planFocus.includes(stepTitle) || stepTitle.includes(planFocus)) {
-            console.log(`[Study Plan Load] Using general plan (matches step)`)
             setStudyPlan(parsed)
           } else {
             // Plan doesn't match current step, keep null to show generate button
-            console.log(`[Study Plan Load] Plan focus (${planFocus}) doesn't match step (${stepTitle})`)
             setStudyPlan(null)
           }
         } else {
-          console.log(`[Study Plan Load] No match, setting null`)
           setStudyPlan(null)
         }
       } catch (error) {
@@ -326,52 +343,54 @@ function StudyPlanContent() {
         setStudyPlan(null)
       }
     } else {
-      console.log(`[Study Plan Load] No stored study plan found`)
       setStudyPlan(null)
     }
 
-    // Load completed tasks for this step (step-specific first, then fallback)
-    const completedTasksKey = activeStepId ? `completedTasks_${user.id}_${activeStepId}` : `completedTasks_${user.id}`
-    const storedCompletedTasks =
-      localStorage.getItem(completedTasksKey) ||
-      localStorage.getItem(`completedTasks_${user.id}`)
-    
-    if (storedCompletedTasks) {
+    // Load completed tasks from database first, then fallback to localStorage
+    const loadCompletedTasks = async () => {
+      let tasksLoaded = false
+      
+      // Try to fetch from database first
       try {
-        const loadedTasks = new Set<string>(JSON.parse(storedCompletedTasks))
-        // Only update if we're loading a different set of tasks
-        setCompletedTasks(prevTasks => {
-          // Preserve tasks that were just completed if they exist in localStorage
-          return loadedTasks.size >= prevTasks.size ? loadedTasks : prevTasks
-        })
+        const response = await fetch(`/api/completed-tasks?userId=${user.id}&stepId=${activeStepId}`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.tasks && Array.isArray(data.tasks)) {
+            const tasksSet = new Set<string>(data.tasks)
+            setCompletedTasks(tasksSet)
+            // Also cache in localStorage for offline access
+            const cacheKey = activeStepId ? `completedTasks_${user.id}_${activeStepId}` : `completedTasks_${user.id}`
+            localStorage.setItem(cacheKey, JSON.stringify(data.tasks))
+            tasksLoaded = true
+          }
+        }
       } catch (error) {
-        console.error("Failed to load completed tasks:", error)
+        console.warn("Failed to fetch completed tasks from database:", error)
       }
-    } else {
-      // Only reset if we genuinely have no stored tasks
-      setCompletedTasks(new Set())
+      
+      // Fallback to localStorage if database fetch failed
+      if (!tasksLoaded) {
+        const completedTasksKey = activeStepId ? `completedTasks_${user.id}_${activeStepId}` : `completedTasks_${user.id}`
+        const storedCompletedTasks =
+          localStorage.getItem(completedTasksKey) ||
+          localStorage.getItem(`completedTasks_${user.id}`)
+        
+        if (storedCompletedTasks) {
+          try {
+            const loadedTasks = JSON.parse(storedCompletedTasks)
+            const loadedTasksSet = new Set<string>(loadedTasks)
+            setCompletedTasks(loadedTasksSet)
+          } catch (error) {
+            console.error("Failed to load completed tasks from localStorage:", error)
+          }
+        } else {
+          setCompletedTasks(new Set())
+        }
+      }
     }
+    
+    loadCompletedTasks()
   }, [user, roadmap, targetStepId])
-
-  useEffect(() => {
-    if (user) {
-      const currentStep = targetStepId
-        ? roadmap?.steps.find((s) => s.id === targetStepId)
-        : roadmap?.steps.find((s) => !s.completed)
-
-      if (currentStep?.id) {
-        localStorage.setItem(
-          `completedTasks_${user.id}_${currentStep.id}`,
-          JSON.stringify(Array.from(completedTasks))
-        )
-      }
-
-      localStorage.setItem(
-        `completedTasks_${user.id}`,
-        JSON.stringify(Array.from(completedTasks))
-      )
-    }
-  }, [user, completedTasks, roadmap, targetStepId])
 
   const markStepAsComplete = async () => {
     if (!user || !roadmap || !studyPlan) return

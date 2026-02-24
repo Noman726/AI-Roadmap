@@ -2,7 +2,10 @@
 
 import { Suspense, useEffect, useState } from "react"
 import { useAuth } from "@/lib/auth-context"
+import { useNotifications } from "@/lib/notification-context"
+import { useGamification } from "@/lib/gamification-context"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useToast } from "@/hooks/use-toast"
 import { Navbar } from "@/components/navbar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,10 +13,11 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { BookOpen, CheckCircle2, Clock, ExternalLink, Loader2, Sparkles, Trophy, Rocket, PartyPopper, ArrowLeft, RefreshCw } from "lucide-react"
+import { BookOpen, CheckCircle2, Clock, ExternalLink, Loader2, Sparkles, Trophy, Rocket, PartyPopper, ArrowLeft, RefreshCw, AlertTriangle } from "lucide-react"
 import { updateStepCompletion } from "@/lib/actions"
 import type { Roadmap } from "@/lib/types"
 
@@ -27,6 +31,9 @@ export default function RoadmapPage() {
 
 function RoadmapContent() {
   const { user, isLoading: authLoading } = useAuth()
+  const { createNotification } = useNotifications()
+  const { recordActivity } = useGamification()
+  const { toast } = useToast()
   const router = useRouter()
   const searchParams = useSearchParams()
   const viewId = searchParams.get("viewId")
@@ -37,6 +44,7 @@ function RoadmapContent() {
   const [showCelebration, setShowCelebration] = useState(false)
   const [isViewingCompleted, setIsViewingCompleted] = useState(false)
   const [showChangeCareer, setShowChangeCareer] = useState(false)
+  const [showConfirmation, setShowConfirmation] = useState(false)
   const [isChangingCareer, setIsChangingCareer] = useState(false)
   const [newCareerGoal, setNewCareerGoal] = useState("")
   const [newSkillLevel, setNewSkillLevel] = useState("")
@@ -158,6 +166,9 @@ function RoadmapContent() {
   const toggleStepCompletion = async (stepId: string) => {
     if (!roadmap || !user) return
 
+    const step = roadmap.steps.find(s => s.id === stepId)
+    const wasCompleted = step?.completed || false
+
     const updatedSteps = roadmap.steps.map((step) =>
       step.id === stepId ? { ...step, completed: !step.completed, progress: !step.completed ? 100 : 0 } : step,
     )
@@ -170,6 +181,15 @@ function RoadmapContent() {
     const allCompleted = updatedSteps.every((s) => s.completed)
     if (allCompleted) {
       setShowCelebration(true)
+      // Record roadmap completion
+      try {
+        await recordActivity("roadmap_completed", {
+          roadmapId: roadmap.id,
+          careerPath: roadmap.careerPath,
+        })
+      } catch (err) {
+        console.warn("Failed to record roadmap completion:", err)
+      }
     }
 
     // Try to save to database
@@ -177,6 +197,19 @@ function RoadmapContent() {
       const step = updatedSteps.find(s => s.id === stepId)
       if (step && typeof step.completed === 'boolean') {
         await updateStepCompletion(user.id, stepId, step.completed)
+        
+        // Record gamification activity for step completion (not for unchecking)
+        if (!wasCompleted && step.completed) {
+          try {
+            await recordActivity("step_completed", {
+              stepId,
+              stepTitle: step.title,
+              roadmapId: roadmap.id,
+            })
+          } catch (err) {
+            console.warn("Failed to record step completion:", err)
+          }
+        }
       }
     } catch (error) {
       console.warn("Failed to save step completion to database:", error)
@@ -214,9 +247,15 @@ function RoadmapContent() {
           })),
         }
 
+        // Save new roadmap to localStorage
         setRoadmap(nextRoadmap)
         setShowCelebration(false)
         localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(nextRoadmap))
+        
+        // Refresh to pick up the completed roadmap and new roadmap from database
+        setTimeout(() => {
+          router.push('/dashboard')
+        }, 500)
       }
     } catch (error) {
       console.error("Error generating next roadmap:", error)
@@ -225,15 +264,26 @@ function RoadmapContent() {
     }
   }
 
+  const handleChangeCareerClick = () => {
+    if (!newCareerGoal.trim()) return
+    setShowChangeCareer(false)
+    setShowConfirmation(true)
+  }
+
   const changeCareerPath = async () => {
     if (!user || !newCareerGoal.trim()) return
+    setShowConfirmation(false)
     setIsChangingCareer(true)
+    
+    const oldCareerPath = roadmap?.careerPath || "previous career path"
+    const newCareerPath = newCareerGoal.trim()
+    
     try {
       // Load existing profile and update career goal
       const existingProfile = JSON.parse(localStorage.getItem(`profile_${user.id}`) || "{}")
       const updatedProfile = {
         ...existingProfile,
-        careerGoal: newCareerGoal.trim(),
+        careerGoal: newCareerPath,
         ...(newSkillLevel ? { currentSkillLevel: newSkillLevel } : {}),
       }
 
@@ -250,20 +300,20 @@ function RoadmapContent() {
       }
       keysToRemove.forEach(key => localStorage.removeItem(key))
 
-      // Try to update profile in database
-      try {
-        await fetch("/api/profile", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: user.id,
-            email: user.email,
-            name: user.name,
-            profileData: updatedProfile,
-          }),
-        })
-      } catch (err) {
-        console.warn("Failed to save updated profile to DB:", err)
+      // Update profile in database (required)
+      const profileResponse = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          profileData: updatedProfile,
+        }),
+      })
+      
+      if (!profileResponse.ok) {
+        throw new Error("Failed to save profile to database")
       }
 
       // Generate a new roadmap with the updated career goal
@@ -272,43 +322,84 @@ function RoadmapContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile: updatedProfile }),
       })
+      
+      if (!response.ok) {
+        throw new Error("Failed to generate new roadmap")
+      }
+      
       const data = await response.json()
 
-      if (data.roadmap) {
-        const newRoadmap = {
-          ...data.roadmap,
-          completedAt: null,
-          steps: data.roadmap.steps.map((step: any) => ({
-            ...step,
-            completed: false,
-            progress: 0,
-            skills: Array.isArray(step.skills) ? step.skills : [],
-            resources: Array.isArray(step.resources) ? step.resources : [],
-            milestones: Array.isArray(step.milestones) ? step.milestones : [],
-          })),
-        }
-
-        setRoadmap(newRoadmap)
-        setShowCelebration(false)
-        localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(newRoadmap))
-
-        // Save new roadmap to database
-        try {
-          const { saveRoadmap } = await import("@/lib/actions")
-          await saveRoadmap(user.id, newRoadmap)
-        } catch (dbError) {
-          console.warn("Failed to save new roadmap to database:", dbError)
-        }
+      if (!data.roadmap) {
+        throw new Error("No roadmap data received")
       }
 
-      setShowChangeCareer(false)
+      const newRoadmap = {
+        ...data.roadmap,
+        completedAt: null,
+        steps: data.roadmap.steps.map((step: any) => ({
+          ...step,
+          completed: false,
+          progress: 0,
+          skills: Array.isArray(step.skills) ? step.skills : [],
+          resources: Array.isArray(step.resources) ? step.resources : [],
+          milestones: Array.isArray(step.milestones) ? step.milestones : [],
+        })),
+      }
+
+      setRoadmap(newRoadmap)
+      setShowCelebration(false)
+      localStorage.setItem(`roadmap_${user.id}`, JSON.stringify(newRoadmap))
+
+      // Save new roadmap to database (required)
+      const { saveRoadmap } = await import("@/lib/actions")
+      await saveRoadmap(user.id, newRoadmap)
+      
+      // Create a notification in the backend for the career change
+      try {
+        await createNotification({
+          type: "career_change",
+          title: "🎯 Career Path Changed!",
+          message: `You've successfully switched your career path from "${oldCareerPath}" to "${newCareerPath}". Your new roadmap is ready!`,
+          metadata: {
+            oldCareerPath,
+            newCareerPath,
+            skillLevel: newSkillLevel || updatedProfile.currentSkillLevel,
+            roadmapId: newRoadmap.id,
+            timestamp: new Date().toISOString(),
+          },
+        })
+      } catch (notifError) {
+        console.warn("Failed to create career change notification:", notifError)
+      }
+
+      // Show success toast
+      toast({
+        title: "Career Path Changed Successfully! 🎉",
+        description: `Your new ${newCareerPath} roadmap is ready. All progress has been saved to your account.`,
+      })
+
       setNewCareerGoal("")
       setNewSkillLevel("")
     } catch (error) {
       console.error("Error changing career path:", error)
+      
+      // Show error toast
+      toast({
+        title: "Failed to Change Career Path",
+        description: "There was an error updating your career path. Please try again.",
+        variant: "destructive",
+      })
+      
+      // Reopen the form dialog so user can try again
+      setShowChangeCareer(true)
     } finally {
       setIsChangingCareer(false)
     }
+  }
+
+  const cancelCareerChange = () => {
+    setShowConfirmation(false)
+    setShowChangeCareer(true)
   }
 
   if (authLoading || (isRoadmapLoading && !!user)) {
@@ -422,27 +513,67 @@ function RoadmapContent() {
                     </div>
                   </div>
                   <DialogFooter>
-                    <Button variant="outline" onClick={() => setShowChangeCareer(false)} disabled={isChangingCareer}>
+                    <Button variant="outline" onClick={() => setShowChangeCareer(false)}>
                       Cancel
                     </Button>
-                    <Button onClick={changeCareerPath} disabled={!newCareerGoal.trim() || isChangingCareer}>
-                      {isChangingCareer ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="mr-2 h-4 w-4" />
-                          Generate New Roadmap
-                        </>
-                      )}
+                    <Button onClick={handleChangeCareerClick} disabled={!newCareerGoal.trim()}>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Generate New Roadmap
                     </Button>
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
             )}
           </div>
+
+          {/* Confirmation Dialog */}
+          <AlertDialog open={showConfirmation} onOpenChange={setShowConfirmation}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-amber-600" />
+                  <AlertDialogTitle>Confirm Career Path Change</AlertDialogTitle>
+                </div>
+                <AlertDialogDescription className="space-y-3 pt-2">
+                  <p>
+                    You're about to change your career path from <strong>{roadmap?.careerPath}</strong> to <strong>{newCareerGoal}</strong>.
+                  </p>
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm">
+                    <p className="font-semibold text-amber-900 mb-2">This will:</p>
+                    <ul className="space-y-1 text-amber-800 list-disc list-inside">
+                      <li>Save your current roadmap to history</li>
+                      <li>Clear all study plans for the current path</li>
+                      <li>Reset progress tracking for the new path</li>
+                      <li>Generate a completely new roadmap</li>
+                    </ul>
+                  </div>
+                  <p className="text-sm">
+                    Your completed steps and achievements will remain in your history and can be viewed from the dashboard.
+                  </p>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={cancelCareerChange}>Go Back</AlertDialogCancel>
+                <AlertDialogAction 
+                  onClick={changeCareerPath}
+                  disabled={isChangingCareer}
+                  className="bg-primary hover:bg-primary/90"
+                >
+                  {isChangingCareer ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      Continue with Change
+                    </>
+                  )}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
           <div className="mt-4 flex items-center gap-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="h-4 w-4" />

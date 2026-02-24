@@ -169,14 +169,14 @@ export function Chatbot({
 
   if (compact) {
     return (
-      <div className="flex flex-col h-full bg-white rounded-lg border shadow-sm">
-        <CardHeader className="border-b py-3">
+      <div className="flex flex-col h-full bg-white rounded-lg border shadow-sm overflow-hidden">
+        <CardHeader className="border-b py-3 flex-shrink-0">
           <CardTitle className="flex items-center gap-2 text-sm">
             <Bot className="w-4 h-4" />
             {title}
           </CardTitle>
         </CardHeader>
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="p-4 space-y-4">
             {!isInitialized ? (
               <div className="flex items-center justify-center h-64">
@@ -209,13 +209,13 @@ export function Chatbot({
                     )}
                     <div
                       className={cn(
-                        "max-w-xs px-3 py-2 rounded-lg text-sm",
+                        "max-w-[75%] px-3 py-2 rounded-lg text-sm overflow-hidden",
                         msg.role === "user"
                           ? "bg-primary text-white rounded-br-none"
                           : "bg-gray-100 text-gray-900 rounded-bl-none"
                       )}
                     >
-                      <p className="break-words">{msg.content}</p>
+                      <p className="break-words overflow-wrap-anywhere">{msg.content}</p>
                     </div>
                     {msg.role === "user" && (
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -241,7 +241,7 @@ export function Chatbot({
         </ScrollArea>
         <form
           onSubmit={handleSendMessage}
-          className="border-t p-3 flex gap-2"
+          className="border-t p-3 flex gap-2 flex-shrink-0"
         >
           <Input
             value={input}
@@ -268,14 +268,14 @@ export function Chatbot({
   }
 
   return (
-    <div className={cn("flex flex-col bg-white rounded-lg border shadow-lg", maxHeight)}>
-      <CardHeader className="border-b">
+    <div className={cn("flex flex-col bg-white rounded-lg border shadow-lg overflow-hidden", maxHeight)}>
+      <CardHeader className="border-b flex-shrink-0">
         <CardTitle className="flex items-center gap-2">
           <Bot className="w-5 h-5 text-blue-600" />
           {title}
         </CardTitle>
       </CardHeader>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-4 space-y-4">
           {!isInitialized ? (
             <div className="flex items-center justify-center h-96">
@@ -311,13 +311,13 @@ export function Chatbot({
                   )}
                   <div
                     className={cn(
-                      "max-w-md px-4 py-3 rounded-lg",
+                      "max-w-[75%] px-4 py-3 rounded-lg overflow-hidden",
                       msg.role === "user"
                         ? "bg-primary text-white rounded-br-none"
                         : "bg-gray-100 text-gray-900 rounded-bl-none"
                     )}
                   >
-                    <p className="break-words whitespace-pre-wrap">{msg.content}</p>
+                    <p className="break-words whitespace-pre-wrap overflow-wrap-anywhere">{msg.content}</p>
                     {msg.createdAt && (
                       <p className="text-xs mt-2 opacity-70">
                         {new Date(msg.createdAt).toLocaleTimeString()}
@@ -348,7 +348,7 @@ export function Chatbot({
       </ScrollArea>
       <form
         onSubmit={handleSendMessage}
-        className="border-t p-4 flex gap-2"
+        className="border-t p-4 flex gap-2 flex-shrink-0"
       >
         <Input
           value={input}

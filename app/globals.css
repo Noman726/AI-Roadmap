@@ -151,3 +151,9 @@
     @apply font-heading;
   }
 }
+
+@layer utilities {
+  .overflow-wrap-anywhere {
+    overflow-wrap: anywhere;
+  }
+}
